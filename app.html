@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>小宇宙桌面版</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-expanded="true" title="折叠侧栏"><span aria-hidden="true">‹</span><span class="sr-only">折叠侧栏</span></button>
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <div>
+            <div class="brand-name">小宇宙</div>
+            <div class="brand-kicker">DESKTOP LISTENING ROOM</div>
+          </div>
+        </div>
+        <nav class="main-nav" aria-label="主导航">
+          <button class="nav-item is-active" data-route="discover"><span class="nav-icon">✦</span><span>发现</span></button>
+          <button class="nav-item" data-route="search"><span class="nav-icon">⌕</span><span>搜索</span></button>
+          <button class="nav-item" data-route="subscriptions"><span class="nav-icon">◒</span><span>我的订阅</span></button>
+          <button class="nav-item" data-route="settings"><span class="nav-icon">⚙</span><span>设置</span></button>
+        </nav>
+        <div class="sidebar-rule"></div>
+        <div class="sidebar-note">
+          <span class="note-dot"></span>
+          <span>把耳朵交给<br />下一段故事</span>
+        </div>
+      </aside>
+
+      <main class="main-column">
+        <header class="topbar">
+          <button id="back-button" class="round-button" title="返回节目来源页" hidden>←</button>
+          <div class="topbar-context"><span id="route-eyebrow">EXPLORE</span><strong id="route-title">发现</strong></div>
+          <div class="topbar-actions">
+            <div id="connection-state" class="connection-state"><span></span><em>未连接</em></div>
+            <button id="account-button" class="account-button">登录</button>
+          </div>
+        </header>
+
+        <section id="page-content" class="page-content" aria-live="polite"></section>
+      </main>
+
+      <footer class="player-bar" aria-label="播放器">
+        <div class="now-playing">
+          <div id="player-cover" class="player-cover"><span>◌</span></div>
+          <div class="player-copy"><strong id="player-title">还没有开始播放</strong><span id="player-subtitle">从发现页挑一集播客</span><span id="transcription-status" class="transcription-status" hidden></span></div>
+        </div>
+        <div class="player-controls">
+          <button id="skip-back" title="后退 15 秒">↶<small>15</small></button>
+          <button id="play-button" class="play-button" title="播放 / 暂停">▶</button>
+          <button id="skip-forward" title="前进 30 秒">↷<small>30</small></button>
+        </div>
+        <div class="player-progress"><span id="current-time">0:00</span><input id="progress" type="range" min="0" max="100" value="0" /><span id="duration">0:00</span></div>
+        <div class="player-extra"><button id="speed-button">1×</button><button id="download-audio-button" class="player-link-button" title="下载当前单集音频" disabled>下载音频</button><button id="transcribe-audio-button" class="player-link-button" title="使用已配置的 ASR API 转写当前单集" disabled>ASR 转写</button><button id="copy-episode-link-button" class="player-link-button" title="复制当前单集链接" disabled>复制单集</button><button id="copy-podcast-link-button" class="player-link-button" title="复制当前节目链接" disabled>复制节目</button></div>
+        <audio id="audio" preload="metadata"></audio>
+      </footer>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+    <dialog id="login-dialog" class="dialog">
+      <form id="login-form" method="dialog">
+        <button type="button" class="dialog-close" data-close-dialog>×</button>
+        <div class="dialog-kicker">YOUR LISTENING ACCOUNT</div>
+        <h2>登录小宇宙</h2>
+        <p class="dialog-lead">登录后同步订阅与收听记录。验证码只提交至小宇宙认证接口。</p>
+        <label>手机号<input id="phone-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="请输入手机号" required /></label>
+        <div class="code-row"><label>验证码<input id="code-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" required /></label><button id="send-code-button" type="button" class="secondary-button">发送验证码</button></div>
+        <button class="primary-button" type="submit">登录并同步</button>
+        <p id="login-error" class="form-error"></p>
+      </form>
+    </dialog>
+    <script src="app.js"></script>
+  </body>
+</html>

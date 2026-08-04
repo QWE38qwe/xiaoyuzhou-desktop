@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "小宇宙桌面版（非官方）",
+  "short_name": "小宇宙",
+  "version": "0.2.1",
+  "description": "非官方小宇宙桌面扩展：发现、搜索、订阅、音频下载与云端 ASR Markdown 转写。",
+  "minimum_chrome_version": "110",
+  "permissions": [
+    "storage",
+    "windows",
+    "clipboardWrite",
+    "downloads",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://api.xiaoyuzhoufm.com/*",
+    "https://podcaster-api.xiaoyuzhoufm.com/*",
+    "https://media.xyzcdn.net/*",
+    "https://*.xyzcdn.net/*",
+    "https://*.xiaoyuzhoufm.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.xiaoyuzhoufm.com https://podcaster-api.xiaoyuzhoufm.com https://*.xiaoyuzhoufm.com https://*.xyzcdn.net; img-src 'self' data: https://*.xiaoyuzhoufm.com https://*.xyzcdn.net; media-src 'self' https://*.xiaoyuzhoufm.com https://*.xyzcdn.net;"
+  },
+  "action": {
+    "default_title": "打开小宇宙桌面版",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "打开或聚焦小宇宙桌面版"
+    }
+  }
+}

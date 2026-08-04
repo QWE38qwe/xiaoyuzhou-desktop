@@ -1,0 +1,22 @@
+# macOS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local runtime and secrets
+.env
+.env.*
+!.env.example
+.dbg/
+*.log
+asr_credentials.json
+runtime.json
+native_runtime/
+
+# Legacy page-injection experiment, not referenced by manifest.json
+content.js
+content.css
