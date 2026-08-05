@@ -71,6 +71,7 @@ const DEFAULT_SETTINGS = {
   transcriptFolder: "小宇宙转写稿",
   audioDownloadPath: "",
   transcriptDownloadPath: "",
+  summaryDownloadPath: "",
   downloadSaveAs: false,
   asrProvider: "qwen",
   asrSettingsVersion: ASR_SETTINGS_VERSION,
@@ -347,6 +348,11 @@ function transcriptDirectoryFromSettings(settings) {
     || "~/Downloads/小宇宙转写稿";
 }
 
+function summaryDirectoryFromSettings(settings) {
+  return normalizeAbsolutePath(settings.summaryDownloadPath, "AI 总结稿保存路径")
+    || transcriptDirectoryFromSettings(settings);
+}
+
 async function transcribeAudio({ url, filename, baseName, language = "zh" }) {
   let parsed;
   try {
@@ -399,6 +405,7 @@ async function summarizeTranscript({ transcriptPath }) {
     action: "summarize_transcript",
     transcriptPath: String(transcriptPath || ""),
     transcriptDirectory: transcriptDirectoryFromSettings(settings),
+    summaryDirectory: summaryDirectoryFromSettings(settings),
     provider,
     endpoint: providerSettings.endpoint,
     model: providerSettings.model,
@@ -536,6 +543,7 @@ async function updateSettings(next) {
   settings.transcriptFolder = normalizeDownloadFolder(settings.transcriptFolder);
   settings.audioDownloadPath = normalizeAbsolutePath(settings.audioDownloadPath, "音频保存路径");
   settings.transcriptDownloadPath = normalizeAbsolutePath(settings.transcriptDownloadPath, "转写稿保存路径");
+  settings.summaryDownloadPath = normalizeAbsolutePath(settings.summaryDownloadPath, "AI 总结稿保存路径");
   settings.downloadSaveAs = Boolean(settings.downloadSaveAs);
   settings.asrProvider = ["qwen", "doubao"].includes(settings.asrProvider) ? settings.asrProvider : "qwen";
   for (const [provider, config] of Object.entries(settings.summaryProviders)) {
@@ -548,10 +556,14 @@ async function updateSettings(next) {
     if (endpoint.protocol !== "https:") throw new Error(`${provider} AI 总结接口必须使用 HTTPS`);
     if (!String(config.model || "").trim()) throw new Error(`${provider} AI 总结模型不能为空`);
   }
-  if (settings.audioDownloadPath || settings.transcriptDownloadPath) {
+  if (settings.audioDownloadPath || settings.transcriptDownloadPath || settings.summaryDownloadPath) {
     await nativeHostRequest({
       action: "ensure_directories",
-      directories: [settings.audioDownloadPath, settings.transcriptDownloadPath].filter(Boolean)
+      directories: [
+        settings.audioDownloadPath,
+        settings.transcriptDownloadPath,
+        settings.summaryDownloadPath
+      ].filter(Boolean)
     });
   }
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });

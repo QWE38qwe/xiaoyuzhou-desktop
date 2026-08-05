@@ -24,7 +24,7 @@
 
 ![下载与 ASR 设置](docs/images/settings-asr.png)
 
-音频与转写稿可分别指定 macOS 绝对保存目录。ASR 支持 Qwen 与豆包；AI 总结支持 Qwen、豆包、DeepSeek、Kimi 和 GLM，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain。
+音频、ASR 转写稿与 AI 总结稿可分别指定 macOS 绝对保存目录。ASR 支持 Qwen 与豆包；AI 总结支持 Qwen、豆包、DeepSeek、Kimi 和 GLM，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain。
 
 ## 功能
 
@@ -87,7 +87,7 @@ chmod +x install_native_host.sh
 
 1. 点击扩展图标打开桌面窗口
 2. 登录小宇宙账号
-3. 在“设置”中配置音频和转写稿保存目录
+3. 在“设置”中分别配置音频、ASR 转写稿和 AI 总结稿保存目录
 4. 配置 ASR 和 AI 总结服务并保存对应 API Key
 5. 点击“AI 总结”自动执行缺失的 ASR 转写并生成总结，或在“更多”中单独下载音频、执行 ASR
 6. 也可以在设置页选择已有 Markdown 转写稿直接总结
@@ -125,6 +125,8 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 ```text
 原转写稿名称 - AI总结.md
 ```
+
+AI 总结稿目录留空时沿用 ASR 转写稿目录，已有用户升级后不会改变原来的输出位置。
 
 ## 隐私与安全
 

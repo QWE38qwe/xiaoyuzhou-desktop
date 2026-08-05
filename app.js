@@ -566,6 +566,7 @@ function renderSettingsPage(root) {
   const settings = state.settings || {};
   const audioPath = String(settings.audioDownloadPath || "");
   const transcriptPath = String(settings.transcriptDownloadPath || "");
+  const summaryPath = String(settings.summaryDownloadPath || "");
   state.summaryPromptDrafts = (settings.summaryPromptVersions || []).map((prompt) => ({ ...prompt }));
   const summaryProviderOptions = SUMMARY_PROVIDERS.map(
     (provider) => `<option value="${provider.id}">${provider.label}</option>`
@@ -593,12 +594,16 @@ function renderSettingsPage(root) {
           <label>ASR 转写稿保存目录
             <div class="path-input-row"><input id="transcript-download-path" type="text" value="${esc(transcriptPath)}" placeholder="留空使用浏览器默认下载目录/小宇宙转写稿" autocomplete="off" /><button type="button" class="secondary-button" data-choose-directory="transcript-download-path">选择目录</button></div>
           </label>
-          <p class="field-hint">实际位置：<code id="transcript-path-preview"></code>。音频与转写稿目录互相独立。</p>
+          <p class="field-hint">实际位置：<code id="transcript-path-preview"></code>。</p>
+          <label>AI 总结稿保存目录
+            <div class="path-input-row"><input id="summary-download-path" type="text" value="${esc(summaryPath)}" placeholder="留空使用 ASR 转写稿保存目录" autocomplete="off" /><button type="button" class="secondary-button" data-choose-directory="summary-download-path">选择目录</button></div>
+          </label>
+          <p class="field-hint">实际位置：<code id="summary-path-preview"></code>。三个目录可分别配置。</p>
           <label class="checkbox-row"><input id="download-save-as" type="checkbox" ${settings.downloadSaveAs ? "checked" : ""} /><span>使用浏览器默认目录时，每次下载询问保存位置</span></label>
           <div id="native-host-status" class="native-host-status">正在检测本地文件助手……</div>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><div class="route-eyebrow">CLOUD TRANSCRIPTION</div><h3>API 转写</h3></div><p>仅点击“ASR 转写”后发送音频。</p></div>
+          <div class="settings-section-heading"><div><div class="route-eyebrow">CLOUD TRANSCRIPTION</div><h3>API 转写</h3></div><p>仅主动触发“ASR 转写”或“AI 总结”后发送音频。</p></div>
           <label>ASR 服务<select id="asr-provider"><option value="qwen">Qwen ASR</option><option value="doubao">豆包 ASR</option></select></label>
           <div class="provider-settings" data-asr-provider-settings="qwen">
             <label>Qwen API Key<input id="qwen-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /></label>
@@ -671,16 +676,24 @@ function renderSettingsPage(root) {
   const updatePreview = () => {
     const audioValue = $("#audio-download-path").value.trim();
     const transcriptValue = $("#transcript-download-path").value.trim();
+    const summaryValue = $("#summary-download-path").value.trim();
     $("#audio-path-preview").textContent = audioValue || "浏览器默认下载目录/小宇宙音频";
     $("#transcript-path-preview").textContent = transcriptValue || "浏览器默认下载目录/小宇宙转写稿";
+    $("#summary-path-preview").textContent = summaryValue || transcriptValue || "浏览器默认下载目录/小宇宙转写稿";
     $("#download-save-as").disabled = Boolean(audioValue);
   };
   updatePreview();
   $("#audio-download-path").addEventListener("input", updatePreview);
   $("#transcript-download-path").addEventListener("input", updatePreview);
+  $("#summary-download-path").addEventListener("input", updatePreview);
   $$("[data-choose-directory]").forEach((button) => button.addEventListener("click", async () => {
     try {
-      const prompt = button.dataset.chooseDirectory === "audio-download-path" ? "请选择音频保存目录" : "请选择 ASR 转写稿保存目录";
+      const prompts = {
+        "audio-download-path": "请选择音频保存目录",
+        "transcript-download-path": "请选择 ASR 转写稿保存目录",
+        "summary-download-path": "请选择 AI 总结稿保存目录"
+      };
+      const prompt = prompts[button.dataset.chooseDirectory] || "请选择保存目录";
       const data = await send("choose-native-directory", { prompt });
       $(`#${button.dataset.chooseDirectory}`).value = data.path;
       updatePreview();
@@ -1131,6 +1144,7 @@ async function saveSettings(event) {
         transcriptFolder: "小宇宙转写稿",
         audioDownloadPath: $("#audio-download-path").value.trim(),
         transcriptDownloadPath: $("#transcript-download-path").value.trim(),
+        summaryDownloadPath: $("#summary-download-path").value.trim(),
         downloadSaveAs: $("#download-save-as").checked,
         asrProvider: $("#asr-provider").value,
         qwenAsrEndpoint: $("#qwen-asr-endpoint").value.trim(),
@@ -1157,8 +1171,12 @@ async function saveSettings(event) {
     renderSummaryProviderStatus(summaryCredentialStatus.summaryConfigured || {});
     $("#audio-download-path").value = state.settings.audioDownloadPath;
     $("#transcript-download-path").value = state.settings.transcriptDownloadPath;
+    $("#summary-download-path").value = state.settings.summaryDownloadPath;
     $("#audio-path-preview").textContent = state.settings.audioDownloadPath || "浏览器默认下载目录/小宇宙音频";
     $("#transcript-path-preview").textContent = state.settings.transcriptDownloadPath || "浏览器默认下载目录/小宇宙转写稿";
+    $("#summary-path-preview").textContent = state.settings.summaryDownloadPath
+      || state.settings.transcriptDownloadPath
+      || "浏览器默认下载目录/小宇宙转写稿";
     notify("设置已保存");
   } catch (error) {
     notify(error.message);

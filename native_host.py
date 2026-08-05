@@ -839,9 +839,12 @@ def summarize_remote(message):
     if len(prompt) > 20_000:
         raise ValueError("AI 总结 Prompt 不能超过 20000 字符")
 
-    transcript_path, directory, transcript = read_transcript_file(
+    transcript_path, _, transcript = read_transcript_file(
         message.get("transcriptPath"),
         message.get("transcriptDirectory"),
+    )
+    summary_directory = ensure_directory(
+        message.get("summaryDirectory") or message.get("transcriptDirectory")
     )
     credentials = load_credentials()
     api_key = summary_api_key(credentials, provider)
@@ -902,7 +905,10 @@ def summarize_remote(message):
             ),
         )
 
-    destination = unique_path(directory, f"{safe_filename(title)} - AI总结.md")
+    destination = unique_path(
+        summary_directory,
+        f"{safe_filename(title)} - AI总结.md",
+    )
     destination.write_text(
         ensure_summary_markdown(title, summary),
         encoding="utf-8",
