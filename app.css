@@ -64,3 +64,25 @@ button { border: 0; cursor: pointer; }
   .podcast-detail-copy h1 { font-size: 30px; }
   .podcast-episode-row .row-action { display: none; }
 }
+
+.settings-section textarea { background: var(--paper-deep); border: 1px solid transparent; border-radius: 4px; color: var(--ink); font: 11px/1.75 "DM Mono", monospace; outline: 0; padding: 12px; resize: vertical; width: 100%; }
+.settings-section textarea:focus { border-color: var(--blue); }
+.credential-row { display: grid; gap: 7px; grid-template-columns: minmax(0, 1fr) auto; }
+.credential-row .mini-button { padding-inline: 13px; }
+.summary-settings-section { border-top: 3px solid var(--blue); }
+.summary-run-row { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
+.summary-run-row .field-hint { flex: 1; min-width: 220px; }
+.prompt-manager { background: rgba(239,238,233,.72); border: 1px solid var(--line); display: grid; gap: 12px; padding: 15px; }
+.prompt-manager-heading { align-items: center; display: flex; justify-content: space-between; }
+.prompt-manager-heading strong { font-family: "Noto Serif SC", serif; font-size: 14px; }
+.prompt-badge { background: var(--yellow); border-radius: 999px; color: var(--ink); font: 9px "DM Mono", monospace; max-width: 55%; overflow: hidden; padding: 5px 9px; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-meta-grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) 110px; }
+.prompt-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.mini-button.is-danger { color: #9a5146; }
+.mini-button.is-danger:hover { background: #f3e6df; }
+.consent-actions { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+.consent-actions .primary-button { margin-top: 0; }
+
+@media (max-width: 1050px) {
+  .player-extra #copy-episode-link-button, .player-extra #copy-podcast-link-button { display: none; }
+}

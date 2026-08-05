@@ -54,7 +54,7 @@
           <button id="skip-forward" title="前进 30 秒">↷<small>30</small></button>
         </div>
         <div class="player-progress"><span id="current-time">0:00</span><input id="progress" type="range" min="0" max="100" value="0" /><span id="duration">0:00</span></div>
-        <div class="player-extra"><button id="speed-button">1×</button><button id="download-audio-button" class="player-link-button" title="下载当前单集音频" disabled>下载音频</button><button id="transcribe-audio-button" class="player-link-button" title="使用已配置的 ASR API 转写当前单集" disabled>ASR 转写</button><button id="copy-episode-link-button" class="player-link-button" title="复制当前单集链接" disabled>复制单集</button><button id="copy-podcast-link-button" class="player-link-button" title="复制当前节目链接" disabled>复制节目</button></div>
+        <div class="player-extra"><button id="speed-button">1×</button><button id="download-audio-button" class="player-link-button" title="下载当前单集音频" disabled>下载音频</button><button id="transcribe-audio-button" class="player-link-button" title="使用已配置的 ASR API 转写当前单集" disabled>ASR 转写</button><button id="summarize-button" class="player-link-button" title="总结当前转写稿" disabled>AI 总结</button><button id="copy-episode-link-button" class="player-link-button" title="复制当前单集链接" disabled>复制单集</button><button id="copy-podcast-link-button" class="player-link-button" title="复制当前节目链接" disabled>复制节目</button></div>
         <audio id="audio" preload="metadata"></audio>
       </footer>
     </div>
@@ -70,6 +70,18 @@
         <div class="code-row"><label>验证码<input id="code-input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" required /></label><button id="send-code-button" type="button" class="secondary-button">发送验证码</button></div>
         <button class="primary-button" type="submit">登录并同步</button>
         <p id="login-error" class="form-error"></p>
+      </form>
+    </dialog>
+    <dialog id="summary-consent-dialog" class="dialog">
+      <form method="dialog">
+        <button type="button" class="dialog-close" data-close-dialog>×</button>
+        <div class="dialog-kicker">AI SUMMARY PRIVACY</div>
+        <h2>发送转写稿前确认</h2>
+        <p class="dialog-lead">完整转写稿或分段内容将发送给 <strong id="summary-consent-provider">当前 AI Provider</strong>，并可能产生 API 费用。API Key 仅从 macOS Keychain 读取。</p>
+        <div class="consent-actions">
+          <button type="button" class="secondary-button" data-close-dialog>取消</button>
+          <button id="summary-consent-confirm" type="button" class="primary-button">同意并继续</button>
+        </div>
       </form>
     </dialog>
     <script src="app.js"></script>

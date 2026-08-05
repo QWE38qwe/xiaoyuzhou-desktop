@@ -1,6 +1,13 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const SIDEBAR_COLLAPSED_KEY = "xyzSidebarCollapsed";
+const SUMMARY_PROVIDERS = [
+  { id: "qwen", label: "Qwen", keyField: "summaryQwenApiKey" },
+  { id: "doubao", label: "豆包", keyField: "summaryDoubaoApiKey" },
+  { id: "deepseek", label: "DeepSeek", keyField: "summaryDeepseekApiKey" },
+  { id: "kimi", label: "Kimi", keyField: "summaryKimiApiKey" },
+  { id: "glm", label: "GLM", keyField: "summaryGlmApiKey" }
+];
 
 const state = {
   route: "discover",
@@ -14,7 +21,11 @@ const state = {
   searchKeyword: "",
   searchResults: null,
   podcastView: null,
-  subscribedPids: new Set()
+  subscribedPids: new Set(),
+  currentTranscriptPath: "",
+  currentSummaryPath: "",
+  summaryPromptDrafts: [],
+  summaryPromptEditorId: ""
 };
 
 const routeMeta = {
@@ -504,6 +515,20 @@ function renderSettingsPage(root) {
   const settings = state.settings || {};
   const audioPath = String(settings.audioDownloadPath || "");
   const transcriptPath = String(settings.transcriptDownloadPath || "");
+  state.summaryPromptDrafts = (settings.summaryPromptVersions || []).map((prompt) => ({ ...prompt }));
+  const summaryProviderOptions = SUMMARY_PROVIDERS.map(
+    (provider) => `<option value="${provider.id}">${provider.label}</option>`
+  ).join("");
+  const summaryProviderPanels = SUMMARY_PROVIDERS.map((provider) => {
+    const config = settings.summaryProviders?.[provider.id] || {};
+    return `<div class="provider-settings" data-summary-provider-settings="${provider.id}">
+      <label>${provider.label} API Key
+        <div class="credential-row"><input id="summary-${provider.id}-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /><button class="mini-button" type="button" data-clear-summary-key="${provider.keyField}">清除</button></div>
+      </label>
+      <label>接口地址<input id="summary-${provider.id}-endpoint" type="url" value="${esc(config.endpoint || "")}" /></label>
+      <label>模型<input id="summary-${provider.id}-model" type="text" value="${esc(config.model || "")}" /></label>
+    </div>`;
+  }).join("");
   root.innerHTML = `
     <section class="settings-page">
       <div class="section-heading"><h2>设置</h2><span>PREFERENCES</span></div>
@@ -524,18 +549,46 @@ function renderSettingsPage(root) {
         <section class="settings-section">
           <div class="settings-section-heading"><div><div class="route-eyebrow">CLOUD TRANSCRIPTION</div><h3>API 转写</h3></div><p>仅点击“ASR 转写”后发送音频。</p></div>
           <label>ASR 服务<select id="asr-provider"><option value="qwen">Qwen ASR</option><option value="doubao">豆包 ASR</option></select></label>
-          <div class="provider-settings" data-provider-settings="qwen">
+          <div class="provider-settings" data-asr-provider-settings="qwen">
             <label>Qwen API Key<input id="qwen-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /></label>
             <label>接口地址<input id="qwen-asr-endpoint" type="url" value="${esc(settings.qwenAsrEndpoint || "")}" /></label>
             <label>模型<input id="qwen-asr-model" type="text" value="${esc(settings.qwenAsrModel || "qwen-audio-3.0-asr-flash-filetrans")}" /></label>
           </div>
-          <div class="provider-settings" data-provider-settings="doubao">
+          <div class="provider-settings" data-asr-provider-settings="doubao">
             <label>豆包 API Key<input id="doubao-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /></label>
             <label>接口地址<input id="doubao-asr-endpoint" type="url" value="${esc(settings.doubaoAsrEndpoint || "")}" /></label>
             <label>Resource ID<input id="doubao-asr-resource-id" type="text" value="${esc(settings.doubaoAsrResourceId || "volc.bigasr.auc_turbo")}" /></label>
           </div>
           <div id="asr-provider-status" class="native-host-status">正在检查 API 配置……</div>
-          <p class="field-hint">API Key 由本地助手保存在用户 Library 目录中，扩展不会回显完整密钥。转写会将音频 URL 或音频内容发送至所选服务。</p>
+          <p class="field-hint">API Key 由 Native Host 保存在 macOS Keychain，扩展不会回显完整密钥。转写会将音频 URL 或音频内容发送至所选服务。</p>
+        </section>
+        <section class="settings-section summary-settings-section">
+          <div class="settings-section-heading"><div><div class="route-eyebrow">AI SUMMARY</div><h3>AI 总结</h3></div><p>主动触发后发送转写稿，输出独立 Markdown。</p></div>
+          <label>总结服务<select id="summary-provider">${summaryProviderOptions}</select></label>
+          ${summaryProviderPanels}
+          <div id="summary-provider-status" class="native-host-status">正在检查 AI API 配置……</div>
+          <div class="summary-run-row">
+            <button id="choose-summary-transcript" class="secondary-button" type="button">选择已有转写稿并总结</button>
+            <span id="summary-action-status" class="field-hint">长转写稿会自动分段汇总。</span>
+          </div>
+          <div class="prompt-manager">
+            <div class="prompt-manager-heading">
+              <div><div class="route-eyebrow">PROMPT VERSIONS</div><strong>总结 Prompt 版本</strong></div>
+              <span id="active-prompt-badge" class="prompt-badge"></span>
+            </div>
+            <label>选择版本<select id="summary-prompt-select"></select></label>
+            <div class="prompt-meta-grid">
+              <label>名称<input id="summary-prompt-name" type="text" maxlength="80" /></label>
+              <label>版本<input id="summary-prompt-version" type="text" maxlength="32" /></label>
+            </div>
+            <label>Prompt<textarea id="summary-prompt-content" rows="18" maxlength="20000"></textarea></label>
+            <div class="prompt-actions">
+              <button id="clone-summary-prompt" class="secondary-button" type="button">复制为新版本</button>
+              <button id="activate-summary-prompt" class="mini-button" type="button">设为当前</button>
+              <button id="delete-summary-prompt" class="mini-button is-danger" type="button">删除版本</button>
+            </div>
+            <p class="field-hint">内置版本只读；自定义版本保存在 Chrome 本地存储。支持占位符 <code>{{title}}</code>。</p>
+          </div>
         </section>
         <section class="settings-section">
           <div class="settings-section-heading"><div><div class="route-eyebrow">CONNECTION</div><h3>连接设置</h3></div><p>默认通过扩展 Service Worker 直连。</p></div>
@@ -548,13 +601,22 @@ function renderSettingsPage(root) {
     </section>`;
   $("#api-mode").value = settings.apiMode || "direct";
   $("#asr-provider").value = settings.asrProvider || "qwen";
-  const updateProviderSettings = () => {
-    $$("[data-provider-settings]").forEach((node) => {
-      node.hidden = node.dataset.providerSettings !== $("#asr-provider").value;
+  const updateAsrProviderSettings = () => {
+    $$("[data-asr-provider-settings]").forEach((node) => {
+      node.hidden = node.dataset.asrProviderSettings !== $("#asr-provider").value;
     });
   };
-  updateProviderSettings();
-  $("#asr-provider").addEventListener("change", updateProviderSettings);
+  updateAsrProviderSettings();
+  $("#asr-provider").addEventListener("change", updateAsrProviderSettings);
+  $("#summary-provider").value = settings.summaryProvider || "qwen";
+  const updateSummaryProviderSettings = () => {
+    $$("[data-summary-provider-settings]").forEach((node) => {
+      node.hidden = node.dataset.summaryProviderSettings !== $("#summary-provider").value;
+    });
+  };
+  updateSummaryProviderSettings();
+  $("#summary-provider").addEventListener("change", updateSummaryProviderSettings);
+  initializeSummaryPromptManager(settings.activeSummaryPromptId);
   const updatePreview = () => {
     const audioValue = $("#audio-download-path").value.trim();
     const transcriptValue = $("#transcript-download-path").value.trim();
@@ -575,6 +637,33 @@ function renderSettingsPage(root) {
       notify(error.message);
     }
   }));
+  $$("[data-clear-summary-key]").forEach((button) => button.addEventListener("click", async () => {
+    if (!confirm("确认从 macOS Keychain 删除这个 AI 总结 API Key？")) return;
+    try {
+      const status = await send("save-summary-credentials", {
+        clearKeys: [button.dataset.clearSummaryKey]
+      });
+      renderSummaryProviderStatus(status.summaryConfigured || {});
+      notify("API Key 已从 Keychain 删除");
+    } catch (error) {
+      notify(error.message);
+    }
+  }));
+  $("#choose-summary-transcript").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    try {
+      button.disabled = true;
+      button.textContent = "选择中…";
+      const selected = await send("import-summary-transcript");
+      await summarizeTranscriptPath(selected.path, button, $("#summary-action-status"));
+    } catch (error) {
+      $("#summary-action-status").textContent = error.message;
+      notify(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = "选择已有转写稿并总结";
+    }
+  });
   $("#settings-form").addEventListener("submit", saveSettings);
   send("get-native-host-status").then((status) => {
     const node = $("#native-host-status");
@@ -587,6 +676,107 @@ function renderSettingsPage(root) {
     if (!providerNode) return;
     providerNode.classList.toggle("is-ready", status.qwenConfigured || status.doubaoConfigured);
     providerNode.textContent = `Qwen：${status.qwenConfigured ? "已配置" : "未配置"} · 豆包：${status.doubaoConfigured ? "已配置" : "未配置"}`;
+    renderSummaryProviderStatus(status.summaryConfigured || {});
+  });
+}
+
+function renderSummaryProviderStatus(configured = {}) {
+  const node = $("#summary-provider-status");
+  if (!node) return;
+  const configuredCount = SUMMARY_PROVIDERS.filter((provider) => configured[provider.id]).length;
+  node.classList.toggle("is-ready", configuredCount > 0);
+  node.textContent = SUMMARY_PROVIDERS.map(
+    (provider) => `${provider.label}：${configured[provider.id] ? "已配置" : "未配置"}`
+  ).join(" · ");
+}
+
+function incrementPromptVersion(value) {
+  const parts = String(value || "1.0.0").split(".");
+  const last = Number(parts[parts.length - 1]);
+  if (Number.isInteger(last)) {
+    parts[parts.length - 1] = String(last + 1);
+    return parts.join(".");
+  }
+  return `${value || "1.0.0"}.1`;
+}
+
+function summaryPromptById(id) {
+  return state.summaryPromptDrafts.find((prompt) => prompt.id === id);
+}
+
+function syncSummaryPromptEditor() {
+  const prompt = summaryPromptById(state.summaryPromptEditorId);
+  if (!prompt || prompt.builtin || !$("#summary-prompt-content")) return;
+  prompt.name = $("#summary-prompt-name").value.trim() || "自定义总结 Prompt";
+  prompt.version = $("#summary-prompt-version").value.trim() || "1.0.0";
+  prompt.content = $("#summary-prompt-content").value.trim();
+}
+
+function refreshSummaryPromptSelect(selectedId) {
+  const select = $("#summary-prompt-select");
+  select.innerHTML = state.summaryPromptDrafts.map((prompt) =>
+    `<option value="${esc(prompt.id)}">${esc(prompt.name)} · v${esc(prompt.version)}${prompt.builtin ? "（内置）" : ""}</option>`
+  ).join("");
+  select.value = selectedId;
+}
+
+function loadSummaryPromptEditor(id) {
+  const prompt = summaryPromptById(id) || state.summaryPromptDrafts[0];
+  if (!prompt) return;
+  state.summaryPromptEditorId = prompt.id;
+  $("#summary-prompt-select").value = prompt.id;
+  $("#summary-prompt-name").value = prompt.name;
+  $("#summary-prompt-version").value = prompt.version;
+  $("#summary-prompt-content").value = prompt.content;
+  $("#summary-prompt-name").readOnly = Boolean(prompt.builtin);
+  $("#summary-prompt-version").readOnly = Boolean(prompt.builtin);
+  $("#summary-prompt-content").readOnly = Boolean(prompt.builtin);
+  $("#delete-summary-prompt").disabled = Boolean(prompt.builtin);
+  $("#activate-summary-prompt").disabled = prompt.id === state.settings.activeSummaryPromptId;
+  const active = summaryPromptById(state.settings.activeSummaryPromptId) || state.summaryPromptDrafts[0];
+  $("#active-prompt-badge").textContent = active
+    ? `当前：${active.name} v${active.version}`
+    : "未选择";
+}
+
+function initializeSummaryPromptManager(activeId) {
+  if (!state.summaryPromptDrafts.length) return;
+  state.settings.activeSummaryPromptId = activeId || state.summaryPromptDrafts[0].id;
+  refreshSummaryPromptSelect(state.settings.activeSummaryPromptId);
+  loadSummaryPromptEditor(state.settings.activeSummaryPromptId);
+  $("#summary-prompt-select").addEventListener("change", (event) => {
+    syncSummaryPromptEditor();
+    loadSummaryPromptEditor(event.target.value);
+  });
+  $("#clone-summary-prompt").addEventListener("click", () => {
+    syncSummaryPromptEditor();
+    const source = summaryPromptById(state.summaryPromptEditorId) || state.summaryPromptDrafts[0];
+    const copy = {
+      id: `custom-${crypto.randomUUID()}`,
+      name: `${source.name} 副本`,
+      version: incrementPromptVersion(source.version),
+      content: source.content,
+      builtin: false
+    };
+    state.summaryPromptDrafts.push(copy);
+    refreshSummaryPromptSelect(copy.id);
+    loadSummaryPromptEditor(copy.id);
+  });
+  $("#activate-summary-prompt").addEventListener("click", () => {
+    syncSummaryPromptEditor();
+    state.settings.activeSummaryPromptId = state.summaryPromptEditorId;
+    loadSummaryPromptEditor(state.summaryPromptEditorId);
+    notify("已设为当前 Prompt，保存设置后生效");
+  });
+  $("#delete-summary-prompt").addEventListener("click", () => {
+    const prompt = summaryPromptById(state.summaryPromptEditorId);
+    if (!prompt || prompt.builtin || !confirm(`确认删除 Prompt 版本“${prompt.name}”？`)) return;
+    state.summaryPromptDrafts = state.summaryPromptDrafts.filter((item) => item.id !== prompt.id);
+    if (state.settings.activeSummaryPromptId === prompt.id) {
+      state.settings.activeSummaryPromptId = state.summaryPromptDrafts[0].id;
+    }
+    refreshSummaryPromptSelect(state.settings.activeSummaryPromptId);
+    loadSummaryPromptEditor(state.settings.activeSummaryPromptId);
   });
 }
 
@@ -616,6 +806,7 @@ function copyPodcastLink(item) {
 function updatePlayerLinkButtons(item = null) {
   $("#download-audio-button").disabled = !audioOf(item);
   $("#transcribe-audio-button").disabled = !audioOf(item);
+  $("#summarize-button").disabled = !state.currentTranscriptPath;
   $("#copy-episode-link-button").disabled = !episodeLinkOf(item);
   $("#copy-podcast-link-button").disabled = !podcastLinkOf(item);
 }
@@ -673,11 +864,78 @@ async function transcribeEpisodeAudio(item, button = null) {
     });
     const transcriptPath = result.markdown || result.md || result.txt;
     if (!transcriptPath) throw new Error("ASR 完成但未返回转写稿路径");
+    state.currentTranscriptPath = transcriptPath;
+    state.currentSummaryPath = "";
+    $("#summarize-button").disabled = false;
     setTranscriptionStatus(`转写完成：${transcriptPath}`, "success");
     notify(`转写完成：${transcriptPath}`);
   } catch (error) {
     setTranscriptionStatus(`转写失败：${error.message}`, "error");
     notify(error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+function summaryProviderLabel(providerId = state.settings?.summaryProvider) {
+  return SUMMARY_PROVIDERS.find((provider) => provider.id === providerId)?.label || providerId || "AI Provider";
+}
+
+function ensureSummaryConsent() {
+  if (state.settings?.summaryConsentAccepted) return Promise.resolve(true);
+  const dialog = $("#summary-consent-dialog");
+  $("#summary-consent-provider").textContent = summaryProviderLabel();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    dialog.addEventListener("close", () => finish(false), { once: true });
+    $("#summary-consent-confirm").onclick = async () => {
+      try {
+        state.settings = await send("update-settings", {
+          settings: { summaryConsentAccepted: true }
+        });
+        finish(true);
+        dialog.close();
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+    dialog.showModal();
+  });
+}
+
+async function summarizeTranscriptPath(transcriptPath, button = null, statusNode = null) {
+  if (!transcriptPath) throw new Error("请先生成或选择 Markdown 转写稿");
+  if (!await ensureSummaryConsent()) return null;
+  const originalText = button?.textContent;
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = "总结中…";
+    }
+    if (statusNode) statusNode.textContent = `${summaryProviderLabel()} 正在总结，请保持窗口打开`;
+    setTranscriptionStatus(`${summaryProviderLabel()} AI 正在总结，请保持窗口打开`);
+    const result = await send("summarize-transcript", {
+      payload: { transcriptPath }
+    });
+    const summaryPath = result.markdown;
+    if (!summaryPath) throw new Error("AI 总结完成但未返回 Markdown 路径");
+    state.currentSummaryPath = summaryPath;
+    if (statusNode) statusNode.textContent = `总结完成：${summaryPath}`;
+    setTranscriptionStatus(`AI 总结完成：${summaryPath}`, "success");
+    notify(`AI 总结完成：${summaryPath}`);
+    return result;
+  } catch (error) {
+    if (statusNode) statusNode.textContent = `总结失败：${error.message}`;
+    setTranscriptionStatus(`AI 总结失败：${error.message}`, "error");
+    throw error;
   } finally {
     if (button) {
       button.disabled = false;
@@ -693,6 +951,8 @@ async function openEpisode(item) {
     const audio = audioOf(episode);
     if (!audio) return notify("这集暂时没有可播放的音频地址");
     state.current = episode;
+    state.currentTranscriptPath = "";
+    state.currentSummaryPath = "";
     setTranscriptionStatus();
     updatePlayerLinkButtons(episode);
     const player = $("#audio");
@@ -755,12 +1015,30 @@ async function sendCode() {
 async function saveSettings(event) {
   event.preventDefault();
   try {
-    const credentialStatus = await send("save-asr-credentials", {
+    syncSummaryPromptEditor();
+    if (state.summaryPromptDrafts.some((prompt) => !String(prompt.content || "").trim())) {
+      throw new Error("AI 总结 Prompt 内容不能为空");
+    }
+    const asrCredentialStatus = await send("save-asr-credentials", {
       credentials: {
         qwenApiKey: $("#qwen-api-key").value.trim(),
         doubaoApiKey: $("#doubao-api-key").value.trim()
       }
     });
+    const summaryCredentials = Object.fromEntries(SUMMARY_PROVIDERS.map((provider) => [
+      provider.keyField,
+      $(`#summary-${provider.id}-api-key`).value.trim()
+    ]));
+    const summaryCredentialStatus = await send("save-summary-credentials", {
+      credentials: summaryCredentials
+    });
+    const summaryProviders = Object.fromEntries(SUMMARY_PROVIDERS.map((provider) => [
+      provider.id,
+      {
+        endpoint: $(`#summary-${provider.id}-endpoint`).value.trim(),
+        model: $(`#summary-${provider.id}-model`).value.trim()
+      }
+    ]));
     state.settings = await send("update-settings", {
       settings: {
         apiMode: $("#api-mode").value,
@@ -774,16 +1052,25 @@ async function saveSettings(event) {
         qwenAsrEndpoint: $("#qwen-asr-endpoint").value.trim(),
         qwenAsrModel: $("#qwen-asr-model").value.trim(),
         doubaoAsrEndpoint: $("#doubao-asr-endpoint").value.trim(),
-        doubaoAsrResourceId: $("#doubao-asr-resource-id").value.trim()
+        doubaoAsrResourceId: $("#doubao-asr-resource-id").value.trim(),
+        summaryProvider: $("#summary-provider").value,
+        summaryProviders,
+        summaryPromptVersions: state.summaryPromptDrafts.map((prompt) => ({ ...prompt })),
+        activeSummaryPromptId: state.settings.activeSummaryPromptId,
+        summaryConsentAccepted: Boolean(state.settings.summaryConsentAccepted)
       }
     });
     $("#qwen-api-key").value = "";
     $("#doubao-api-key").value = "";
+    SUMMARY_PROVIDERS.forEach((provider) => {
+      $(`#summary-${provider.id}-api-key`).value = "";
+    });
     const providerNode = $("#asr-provider-status");
     if (providerNode) {
-      providerNode.classList.toggle("is-ready", credentialStatus.qwenConfigured || credentialStatus.doubaoConfigured);
-      providerNode.textContent = `Qwen：${credentialStatus.qwenConfigured ? "已配置" : "未配置"} · 豆包：${credentialStatus.doubaoConfigured ? "已配置" : "未配置"}`;
+      providerNode.classList.toggle("is-ready", asrCredentialStatus.qwenConfigured || asrCredentialStatus.doubaoConfigured);
+      providerNode.textContent = `Qwen：${asrCredentialStatus.qwenConfigured ? "已配置" : "未配置"} · 豆包：${asrCredentialStatus.doubaoConfigured ? "已配置" : "未配置"}`;
     }
+    renderSummaryProviderStatus(summaryCredentialStatus.summaryConfigured || {});
     $("#audio-download-path").value = state.settings.audioDownloadPath;
     $("#transcript-download-path").value = state.settings.transcriptDownloadPath;
     $("#audio-path-preview").textContent = state.settings.audioDownloadPath || "浏览器默认下载目录/小宇宙音频";
@@ -802,6 +1089,9 @@ function initPlayer() {
   $("#speed-button").addEventListener("click", (event) => { const next = audio.playbackRate >= 2 ? 1 : audio.playbackRate + .5; audio.playbackRate = next; event.currentTarget.textContent = `${next}×`; });
   $("#download-audio-button").addEventListener("click", () => state.current ? downloadEpisodeAudio(state.current) : notify("当前没有正在播放的单集"));
   $("#transcribe-audio-button").addEventListener("click", (event) => state.current ? transcribeEpisodeAudio(state.current, event.currentTarget) : notify("当前没有正在播放的单集"));
+  $("#summarize-button").addEventListener("click", (event) => {
+    summarizeTranscriptPath(state.currentTranscriptPath, event.currentTarget).catch((error) => notify(error.message));
+  });
   $("#copy-episode-link-button").addEventListener("click", () => state.current ? copyEpisodeLink(state.current) : notify("当前没有正在播放的单集"));
   $("#copy-podcast-link-button").addEventListener("click", () => state.current ? copyPodcastLink(state.current) : notify("当前没有正在播放的节目"));
   audio.addEventListener("play", () => { $("#play-button").textContent = "Ⅱ"; });

@@ -15,4 +15,4 @@ Use GitHub Private Vulnerability Reporting for this repository. Include:
 - expected impact
 - suggested mitigation, if available
 
-API Keys used by the extension should remain in the Native Host credential file with `0600` permissions and must never be committed to the repository.
+API Keys used by the extension are stored by the Native Host in macOS Keychain. They must never be written to extension storage, logs, project files, or committed to the repository.
