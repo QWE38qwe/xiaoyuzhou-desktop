@@ -88,9 +88,9 @@ chmod +x install_native_host.sh
 1. 点击扩展图标打开桌面窗口
 2. 登录小宇宙账号
 3. 在“设置”中配置音频和转写稿保存目录
-4. 选择 Qwen 或豆包并保存 API Key
-5. 在单集卡片、节目列表或播放器中点击“ASR 转写”
-6. 在播放器中点击“AI 总结”，或在设置页选择已有 Markdown 转写稿
+4. 配置 ASR 和 AI 总结服务并保存对应 API Key
+5. 点击“AI 总结”自动执行缺失的 ASR 转写并生成总结，或在“更多”中单独下载音频、执行 ASR
+6. 也可以在设置页选择已有 Markdown 转写稿直接总结
 
 默认 Qwen 长音频模型：
 
@@ -120,7 +120,7 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 
 接口地址和模型均可在设置页修改。Native Host 只接受对应 Provider 的官方 HTTPS `chat/completions` 域名。
 
-内置 Prompt 输出一句话摘要、核心结论、内容脉络、关键观点与依据、行动项、人物与术语和不确定信息。内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
+下载音频是独立操作，用户不需要在 ASR 前手动下载。Qwen 可直接使用音频 URL；豆包处理部分 M4A 时，Native Host 会在后台下载并转换音频。点击“AI 总结”时，扩展会复用同一单集已有的转写稿；没有转写稿时按 `ASR → AI 总结` 自动执行。内置 Prompt 输出一句话摘要、核心结论、内容脉络、关键观点与依据、行动项、人物与术语和不确定信息。内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
 
 ```text
 原转写稿名称 - AI总结.md
@@ -131,8 +131,8 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 - 小宇宙登录凭证保存在 Chrome 扩展本地存储中
 - ASR 和 AI 总结 API Key 由 Native Host 保存到 macOS Keychain，扩展存储和项目文件中不保存明文 Key
 - 从旧版本升级时，Native Host 仅在 Keychain 写入并校验成功后删除旧的 `asr_credentials.json`；迁移失败会保留原文件
-- 只有主动点击“ASR 转写”后，音频 URL 或音频内容才会发送给所选 ASR 服务
-- 只有主动点击“AI 总结”后，转写稿才会发送给所选 AI 服务；首次发送前会显示全文外发与费用确认
+- 只有主动点击“ASR 转写”或“AI 总结”后，音频 URL 或音频内容才可能发送给所选 ASR 服务
+- 只有主动点击“AI 总结”后，转写稿才会发送给所选 AI 服务；首次执行前会说明 ASR、全文外发与 API 费用
 - 选择已有 Markdown 时，文件会先复制到已配置的转写稿目录；Native Host 只允许总结该目录内的 Markdown
 - 长转写稿按片段发送，Provider 的数据保留策略以对应服务条款为准
 - 项目不会把 API Key 写入扩展存储或仓库

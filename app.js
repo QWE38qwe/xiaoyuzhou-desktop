@@ -23,6 +23,7 @@ const state = {
   podcastView: null,
   subscribedPids: new Set(),
   currentTranscriptPath: "",
+  currentTranscriptEpisodeId: "",
   currentSummaryPath: "",
   summaryPromptDrafts: [],
   summaryPromptEditorId: ""
@@ -51,6 +52,18 @@ function api(endpoint, body = {}, method = "POST") {
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+}
+
+function moreActions(content, className = "") {
+  if (!content) return "";
+  return `<details class="action-menu ${className}">
+    <summary class="more-button" title="更多操作" aria-label="更多操作">⋮</summary>
+    <div class="action-menu-panel" role="menu">${content}</div>
+  </details>`;
+}
+
+function closeActionMenu(target) {
+  target?.closest(".action-menu")?.removeAttribute("open");
 }
 
 function dataOf(response) {
@@ -276,16 +289,20 @@ function podcastCard(item, index) {
   const pid = podcastIdOf(item);
   const canViewPodcast = Boolean(pid);
   const subscribed = state.subscribedPids.has(pid);
-  const download = episodeIdOf(item) ? `<button class="mini-button" data-card-action="download">下载音频</button>` : "";
-  const transcribe = episodeIdOf(item) ? `<button class="mini-button" data-card-action="transcribe">ASR 转写</button>` : "";
-  const episodeLink = episodeIdOf(item) ? `<button class="mini-button" data-card-action="copy-episode">复制单集</button>` : "";
-  const podcastLink = podcastIdOf(item) ? `<button class="mini-button" data-card-action="copy-podcast">复制节目</button>` : "";
+  const canResolveEpisode = Boolean(episodeIdOf(item) || pid);
   const viewPodcast = canViewPodcast ? `<button class="mini-button" data-card-action="view-podcast">查看节目</button>` : "";
-  const subscribe = canViewPodcast ? `<button class="mini-button" data-card-action="subscribe" ${subscribed ? "disabled" : ""}>${subscribed ? "已订阅" : "订阅"}</button>` : "";
+  const summary = canResolveEpisode ? `<button class="mini-button is-accent" data-card-action="summarize">AI 总结</button>` : "";
+  const secondaryActions = [
+    canViewPodcast ? `<button data-card-action="subscribe" role="menuitem" ${subscribed ? "disabled" : ""}>${subscribed ? "已订阅" : "订阅节目"}</button>` : "",
+    canResolveEpisode ? `<button data-card-action="download" role="menuitem">下载音频</button>` : "",
+    canResolveEpisode ? `<button data-card-action="transcribe" role="menuitem">ASR 转写</button>` : "",
+    episodeIdOf(item) ? `<button data-card-action="copy-episode" role="menuitem">复制单集链接</button>` : "",
+    canViewPodcast ? `<button data-card-action="copy-podcast" role="menuitem">复制节目链接</button>` : ""
+  ].join("");
   return `<article class="podcast-card" data-index="${index}">
     <div class="cover">${image ? `<img src="${esc(image)}" alt="" loading="lazy" />` : ""}</div>
     <div class="card-copy"><strong title="${esc(titleOf(item))}">${esc(titleOf(item))}</strong><span>${esc(item?.podcast?.author?.nickname || item?.author?.nickname || item?.description || "小宇宙精选节目")}</span></div>
-    <div class="card-actions"><button class="mini-button" data-card-action="play">播放</button>${viewPodcast}${subscribe}${download}${transcribe}${episodeLink}${podcastLink}</div>
+    <div class="card-actions"><button class="mini-button" data-card-action="play">播放</button>${viewPodcast}${summary}${moreActions(secondaryActions, "action-menu-card")}</div>
   </article>`;
 }
 
@@ -293,14 +310,19 @@ function bindCardActions(holder, items) {
   $$(".podcast-card", holder).forEach((card) => {
     card.addEventListener("click", (event) => {
       const item = items[Number(card.dataset.index)];
-      if (!event.target.closest("button")) return isPodcastItem(item) ? openPodcast(item) : openEpisode(item);
-      if (event.target.dataset.cardAction === "play") openEpisode(item);
-      if (event.target.dataset.cardAction === "view-podcast") openPodcast(item);
-      if (event.target.dataset.cardAction === "subscribe") toggleSubscription(item, event.target);
-      if (event.target.dataset.cardAction === "download") downloadEpisodeAudio(item);
-      if (event.target.dataset.cardAction === "transcribe") transcribeEpisodeAudio(item, event.target);
-      if (event.target.dataset.cardAction === "copy-episode") copyEpisodeLink(item);
-      if (event.target.dataset.cardAction === "copy-podcast") copyPodcastLink(item);
+      const control = event.target.closest("button, summary");
+      if (!control) return isPodcastItem(item) ? openPodcast(item) : openEpisode(item);
+      if (control.tagName === "SUMMARY") return;
+      const action = control.dataset.cardAction;
+      closeActionMenu(control);
+      if (action === "play") openEpisode(item);
+      if (action === "view-podcast") openPodcast(item);
+      if (action === "summarize") summarizeEpisode(item, control).catch((error) => notify(error.message));
+      if (action === "subscribe") toggleSubscription(item, control);
+      if (action === "download") downloadEpisodeAudio(item);
+      if (action === "transcribe") transcribeEpisodeAudio(item, control);
+      if (action === "copy-episode") copyEpisodeLink(item);
+      if (action === "copy-podcast") copyPodcastLink(item);
     });
   });
 }
@@ -354,11 +376,19 @@ function searchResultRow(item, index) {
   const pid = podcastIdOf(item);
   const canViewPodcast = Boolean(pid);
   const subscribed = state.subscribedPids.has(pid);
-  const actions = item?.type === "USER"
-    ? ""
-    : isPodcast
-      ? `<button class="row-action" data-row-action="subscribe" ${subscribed ? "disabled" : ""}>${subscribed ? "已订阅" : "订阅"}</button><button class="row-action is-primary" data-row-action="view-podcast">查看节目</button>`
-      : `<button class="row-action" data-row-action="view-podcast" ${canViewPodcast ? "" : "disabled"}>查看节目</button><button class="row-play" data-row-action="play" title="播放">▶</button>`;
+  const canResolveEpisode = item?.type !== "USER" && Boolean(episodeIdOf(item) || pid);
+  const secondaryActions = item?.type === "USER" ? "" : [
+    isPodcast ? `<button data-row-action="subscribe" role="menuitem" ${subscribed ? "disabled" : ""}>${subscribed ? "已订阅" : "订阅节目"}</button>` : "",
+    canResolveEpisode ? `<button data-row-action="download" role="menuitem">下载音频</button>` : "",
+    canResolveEpisode ? `<button data-row-action="transcribe" role="menuitem">ASR 转写</button>` : "",
+    episodeIdOf(item) ? `<button data-row-action="copy-episode" role="menuitem">复制单集链接</button>` : "",
+    canViewPodcast ? `<button data-row-action="copy-podcast" role="menuitem">复制节目链接</button>` : ""
+  ].join("");
+  const actions = item?.type === "USER" ? "" : `
+    <button class="row-action" data-row-action="play">播放</button>
+    <button class="row-action" data-row-action="view-podcast" ${canViewPodcast ? "" : "disabled"}>查看节目</button>
+    <button class="row-action is-primary" data-row-action="summarize">AI 总结</button>
+    ${moreActions(secondaryActions, "action-menu-row")}`;
   return `<article class="episode-row" data-index="${index}">
     <div class="episode-thumb">${imageOf(item) ? `<img src="${esc(imageOf(item))}" alt="" />` : ""}</div>
     <div class="episode-meta"><strong>${esc(titleOf(item))}</strong><span>${esc(item?.podcast?.title || item?.podcast?.name || item?.description || (isPodcast ? "播客节目" : "小宇宙单集"))}</span></div>
@@ -369,15 +399,23 @@ function searchResultRow(item, index) {
 function bindSearchRows(holder, items) {
   $$(".episode-row", holder).forEach((row) => row.addEventListener("click", (event) => {
     const item = items[Number(row.dataset.index)];
-    const action = event.target.closest("button")?.dataset.rowAction;
-    if (!action) {
+    const control = event.target.closest("button, summary");
+    if (!control) {
       if (isPodcastItem(item)) openPodcast(item);
       else if (episodeIdOf(item)) openEpisode(item);
       return;
     }
+    if (control.tagName === "SUMMARY") return;
+    const action = control.dataset.rowAction;
+    closeActionMenu(control);
     if (action === "play") openEpisode(item);
     if (action === "view-podcast") openPodcast(item);
-    if (action === "subscribe") toggleSubscription(item, event.target);
+    if (action === "summarize") summarizeEpisode(item, control).catch((error) => notify(error.message));
+    if (action === "subscribe") toggleSubscription(item, control);
+    if (action === "download") downloadEpisodeAudio(item);
+    if (action === "transcribe") transcribeEpisodeAudio(item, control);
+    if (action === "copy-episode") copyEpisodeLink(item);
+    if (action === "copy-podcast") copyPodcastLink(item);
   }));
 }
 
@@ -488,14 +526,20 @@ function renderPodcastEpisodes(holder, episodes) {
 function podcastEpisodeRow(episode, index) {
   const published = episode?.pubDate || episode?.publishedAt || episode?.createdAt || "";
   const publishedText = published ? new Date(published).toLocaleDateString("zh-CN") : "节目单集";
+  const secondaryActions = [
+    `<button data-episode-action="download" role="menuitem">下载音频</button>`,
+    `<button data-episode-action="transcribe" role="menuitem">ASR 转写</button>`,
+    `<button data-episode-action="copy-episode" role="menuitem">复制单集链接</button>`,
+    `<button data-episode-action="copy-podcast" role="menuitem">复制节目链接</button>`
+  ].join("");
   return `<article class="episode-row podcast-episode-row" data-index="${index}">
     <div class="episode-thumb">${imageOf(episode) ? `<img src="${esc(imageOf(episode))}" alt="" />` : ""}</div>
     <div class="episode-meta"><strong>${esc(titleOf(episode))}</strong><span>${esc(publishedText)}</span></div>
     <div class="row-actions">
-      <button class="row-action" data-episode-action="copy">复制</button>
-      <button class="row-action" data-episode-action="download">下载</button>
-      <button class="row-action" data-episode-action="transcribe">ASR</button>
-      <button class="row-play" data-episode-action="play" title="播放">▶</button>
+      <button class="row-action" data-episode-action="play">播放</button>
+      <button class="row-action" data-episode-action="view-podcast">查看节目</button>
+      <button class="row-action is-primary" data-episode-action="summarize">AI 总结</button>
+      ${moreActions(secondaryActions, "action-menu-row")}
     </div>
   </article>`;
 }
@@ -503,11 +547,18 @@ function podcastEpisodeRow(episode, index) {
 function bindPodcastEpisodeRows(holder, episodes) {
   $$(".podcast-episode-row", holder).forEach((row) => row.addEventListener("click", (event) => {
     const episode = episodes[Number(row.dataset.index)];
-    const action = event.target.closest("button")?.dataset.episodeAction;
-    if (!action || action === "play") return openEpisode(episode);
-    if (action === "copy") copyEpisodeLink(episode);
+    const control = event.target.closest("button, summary");
+    if (!control) return openEpisode(episode);
+    if (control.tagName === "SUMMARY") return;
+    const action = control.dataset.episodeAction;
+    closeActionMenu(control);
+    if (action === "play") openEpisode(episode);
+    if (action === "view-podcast") openPodcast(episode);
+    if (action === "summarize") summarizeEpisode(episode, control).catch((error) => notify(error.message));
+    if (action === "copy-episode") copyEpisodeLink(episode);
+    if (action === "copy-podcast") copyPodcastLink(episode);
     if (action === "download") downloadEpisodeAudio(episode);
-    if (action === "transcribe") transcribeEpisodeAudio(episode, event.target);
+    if (action === "transcribe") transcribeEpisodeAudio(episode, control);
   }));
 }
 
@@ -804,9 +855,11 @@ function copyPodcastLink(item) {
 }
 
 function updatePlayerLinkButtons(item = null) {
-  $("#download-audio-button").disabled = !audioOf(item);
-  $("#transcribe-audio-button").disabled = !audioOf(item);
-  $("#summarize-button").disabled = !state.currentTranscriptPath;
+  const hasAudio = Boolean(audioOf(item));
+  $("#download-audio-button").disabled = !hasAudio;
+  $("#transcribe-audio-button").disabled = !hasAudio;
+  $("#summarize-button").disabled = !hasAudio;
+  $("#view-podcast-button").disabled = !podcastIdOf(item);
   $("#copy-episode-link-button").disabled = !episodeLinkOf(item);
   $("#copy-podcast-link-button").disabled = !podcastLinkOf(item);
 }
@@ -840,12 +893,12 @@ async function downloadEpisodeAudio(item) {
   }
 }
 
-async function transcribeEpisodeAudio(item, button = null) {
+async function transcribeEpisodeAudio(item, button = null, { propagate = false } = {}) {
   const originalText = button?.textContent;
   try {
     const episode = await resolveEpisode(item);
     const audio = audioOf(episode);
-    if (!audio) return notify("这集暂时没有可转写的音频地址");
+    if (!audio) throw new Error("这集暂时没有可转写的音频地址");
     if (button) {
       button.disabled = true;
       button.textContent = "转写中…";
@@ -865,13 +918,16 @@ async function transcribeEpisodeAudio(item, button = null) {
     const transcriptPath = result.markdown || result.md || result.txt;
     if (!transcriptPath) throw new Error("ASR 完成但未返回转写稿路径");
     state.currentTranscriptPath = transcriptPath;
+    state.currentTranscriptEpisodeId = episodeIdOf(episode);
     state.currentSummaryPath = "";
-    $("#summarize-button").disabled = false;
     setTranscriptionStatus(`转写完成：${transcriptPath}`, "success");
     notify(`转写完成：${transcriptPath}`);
+    return transcriptPath;
   } catch (error) {
     setTranscriptionStatus(`转写失败：${error.message}`, "error");
-    notify(error.message);
+    if (!propagate) notify(error.message);
+    if (propagate) throw error;
+    return null;
   } finally {
     if (button) {
       button.disabled = false;
@@ -911,9 +967,14 @@ function ensureSummaryConsent() {
   });
 }
 
-async function summarizeTranscriptPath(transcriptPath, button = null, statusNode = null) {
+async function summarizeTranscriptPath(
+  transcriptPath,
+  button = null,
+  statusNode = null,
+  { skipConsent = false } = {}
+) {
   if (!transcriptPath) throw new Error("请先生成或选择 Markdown 转写稿");
-  if (!await ensureSummaryConsent()) return null;
+  if (!skipConsent && !await ensureSummaryConsent()) return null;
   const originalText = button?.textContent;
   try {
     if (button) {
@@ -944,6 +1005,26 @@ async function summarizeTranscriptPath(transcriptPath, button = null, statusNode
   }
 }
 
+async function summarizeEpisode(item, button = null) {
+  if (!await ensureSummaryConsent()) return null;
+  const episode = await resolveEpisode(item);
+  const eid = episodeIdOf(episode);
+  if (!eid || !audioOf(episode)) throw new Error("这集暂时没有可总结的音频");
+  const hasMatchingTranscript = (
+    state.currentTranscriptPath
+    && state.currentTranscriptEpisodeId === eid
+  );
+  const transcriptPath = hasMatchingTranscript
+    ? state.currentTranscriptPath
+    : await transcribeEpisodeAudio(episode, button, { propagate: true });
+  return summarizeTranscriptPath(
+    transcriptPath,
+    button,
+    null,
+    { skipConsent: true }
+  );
+}
+
 async function openEpisode(item) {
   try {
     const episode = await resolveEpisode(item);
@@ -951,7 +1032,10 @@ async function openEpisode(item) {
     const audio = audioOf(episode);
     if (!audio) return notify("这集暂时没有可播放的音频地址");
     state.current = episode;
-    state.currentTranscriptPath = "";
+    if (state.currentTranscriptEpisodeId !== episodeIdOf(episode)) {
+      state.currentTranscriptPath = "";
+      state.currentTranscriptEpisodeId = "";
+    }
     state.currentSummaryPath = "";
     setTranscriptionStatus();
     updatePlayerLinkButtons(episode);
@@ -1083,17 +1167,37 @@ async function saveSettings(event) {
 
 function initPlayer() {
   const audio = $("#audio");
+  const closePlayerMenu = () => $("#player-more-menu").removeAttribute("open");
   $("#play-button").addEventListener("click", () => { if (!audio.src) return notify("先选择一集播客"); if (audio.paused) audio.play(); else audio.pause(); });
   $("#skip-back").addEventListener("click", () => { audio.currentTime = Math.max(0, audio.currentTime - 15); });
   $("#skip-forward").addEventListener("click", () => { audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + 30); });
-  $("#speed-button").addEventListener("click", (event) => { const next = audio.playbackRate >= 2 ? 1 : audio.playbackRate + .5; audio.playbackRate = next; event.currentTarget.textContent = `${next}×`; });
-  $("#download-audio-button").addEventListener("click", () => state.current ? downloadEpisodeAudio(state.current) : notify("当前没有正在播放的单集"));
-  $("#transcribe-audio-button").addEventListener("click", (event) => state.current ? transcribeEpisodeAudio(state.current, event.currentTarget) : notify("当前没有正在播放的单集"));
-  $("#summarize-button").addEventListener("click", (event) => {
-    summarizeTranscriptPath(state.currentTranscriptPath, event.currentTarget).catch((error) => notify(error.message));
+  $("#speed-button").addEventListener("click", (event) => {
+    const next = audio.playbackRate >= 2 ? 1 : audio.playbackRate + .5;
+    audio.playbackRate = next;
+    event.currentTarget.textContent = `播放速度 · ${next}×`;
+    closePlayerMenu();
   });
-  $("#copy-episode-link-button").addEventListener("click", () => state.current ? copyEpisodeLink(state.current) : notify("当前没有正在播放的单集"));
-  $("#copy-podcast-link-button").addEventListener("click", () => state.current ? copyPodcastLink(state.current) : notify("当前没有正在播放的节目"));
+  $("#view-podcast-button").addEventListener("click", () => state.current ? openPodcast(state.current) : notify("当前没有正在播放的节目"));
+  $("#download-audio-button").addEventListener("click", () => {
+    closePlayerMenu();
+    return state.current ? downloadEpisodeAudio(state.current) : notify("当前没有正在播放的单集");
+  });
+  $("#transcribe-audio-button").addEventListener("click", (event) => {
+    closePlayerMenu();
+    return state.current ? transcribeEpisodeAudio(state.current, event.currentTarget) : notify("当前没有正在播放的单集");
+  });
+  $("#summarize-button").addEventListener("click", (event) => {
+    if (!state.current) return notify("当前没有正在播放的单集");
+    summarizeEpisode(state.current, event.currentTarget).catch((error) => notify(error.message));
+  });
+  $("#copy-episode-link-button").addEventListener("click", () => {
+    closePlayerMenu();
+    return state.current ? copyEpisodeLink(state.current) : notify("当前没有正在播放的单集");
+  });
+  $("#copy-podcast-link-button").addEventListener("click", () => {
+    closePlayerMenu();
+    return state.current ? copyPodcastLink(state.current) : notify("当前没有正在播放的节目");
+  });
   audio.addEventListener("play", () => { $("#play-button").textContent = "Ⅱ"; });
   audio.addEventListener("pause", () => { $("#play-button").textContent = "▶"; });
   audio.addEventListener("loadedmetadata", () => { $("#duration").textContent = formatTime(audio.duration); });
@@ -1112,6 +1216,12 @@ async function init() {
   $("#account-button").addEventListener("click", () => state.auth ? send("logout").then(() => { state.auth = null; markConnection(); renderRoute(); notify("已退出登录"); }) : openLogin());
   $("#login-form").addEventListener("submit", submitLogin); $("#send-code-button").addEventListener("click", sendCode);
   $$("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
+  document.addEventListener("click", (event) => {
+    const activeMenu = event.target.closest(".action-menu");
+    $$(".action-menu[open]").forEach((menu) => {
+      if (menu !== activeMenu) menu.removeAttribute("open");
+    });
+  });
 }
 
 init().catch((error) => notify(error.message));
