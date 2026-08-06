@@ -607,8 +607,16 @@ function renderSettingsPage(root) {
           <label>ASR 服务<select id="asr-provider"><option value="qwen">Qwen ASR</option><option value="doubao">豆包 ASR</option></select></label>
           <div class="provider-settings" data-asr-provider-settings="qwen">
             <label>Qwen API Key<input id="qwen-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /></label>
-            <label>接口地址<input id="qwen-asr-endpoint" type="url" value="${esc(settings.qwenAsrEndpoint || "")}" /></label>
-            <label>模型<input id="qwen-asr-model" type="text" value="${esc(settings.qwenAsrModel || "qwen-audio-3.0-asr-flash-filetrans")}" /></label>
+            <label>API Base URL 或完整地址<input id="qwen-asr-endpoint" type="url" value="${esc(settings.qwenAsrEndpoint || "")}" placeholder="https://dashscope.aliyuncs.com/api/v1" /></label>
+            <label>模型<input id="qwen-asr-model" type="text" list="qwen-asr-model-options" value="${esc(settings.qwenAsrModel || "qwen-audio-3.0-asr-flash-filetrans")}" /></label>
+            <datalist id="qwen-asr-model-options">
+              <option value="qwen-audio-3.0-asr-flash-filetrans"></option>
+              <option value="fun-asr"></option>
+              <option value="fun-asr-flash-2026-06-15"></option>
+              <option value="qwen3-asr-flash-filetrans"></option>
+              <option value="qwen3-asr-flash"></option>
+            </datalist>
+            <p class="field-hint">程序会按模型自动选择异步文件转写、DashScope 同步或 OpenAI-compatible 路径。长播客推荐 <code>qwen-audio-3.0-asr-flash-filetrans</code>；Fun-ASR-Flash 单次最多 5 分钟。</p>
           </div>
           <div class="provider-settings" data-asr-provider-settings="doubao">
             <label>豆包 API Key<input id="doubao-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /></label>

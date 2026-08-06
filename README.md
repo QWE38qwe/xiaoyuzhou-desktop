@@ -98,6 +98,20 @@ chmod +x install_native_host.sh
 qwen-audio-3.0-asr-flash-filetrans
 ```
 
+Qwen ASR 的接口地址可以填写 Base URL：
+
+```text
+https://dashscope.aliyuncs.com/api/v1
+```
+
+也可以填写 Workspace 专属 Base URL 或任一完整 Qwen ASR Endpoint。程序会根据模型自动选择正确路径：
+
+- `qwen-audio-3.0-asr-flash-filetrans`、`qwen3-asr-flash-filetrans`、`fun-asr`：异步文件转写
+- `fun-asr-flash-*`、`qwen-audio-3.0-asr-flash`：DashScope 同步识别
+- `qwen3-asr-flash`：OpenAI-compatible
+
+Fun-ASR-Flash 单次最多处理 5 分钟，长播客请使用 `qwen-audio-3.0-asr-flash-filetrans`。
+
 新转写稿保存为：
 
 ```markdown
@@ -180,8 +194,17 @@ done
 ## 已知限制
 
 - Native Host 当前仅支持 macOS
+- 本地 Qwen ASR 尚未集成到扩展；当前 ASR 使用 Qwen 或豆包 API
 - 本项目依赖非公开稳定性承诺的小宇宙接口，接口变化可能导致部分功能失效
 - 当前未发布到 Chrome Web Store，需要通过开发者模式安装
+
+### Qwen ASR 404
+
+`0.3.1` 起，扩展会根据模型自动补全 Qwen ASR 的服务路径。若仍返回 404：
+
+1. 确认接口域名与 API Key 属于同一地域或 Workspace。
+2. 优先填写 Base URL，不要手工混用 `audio/asr/transcription`、`multimodal-generation/generation` 和 `chat/completions`。
+3. 重新运行 `install_native_host.sh`，并在 `chrome://extensions` 重新加载扩展。
 
 ## License
 

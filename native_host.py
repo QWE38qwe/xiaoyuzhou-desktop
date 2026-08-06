@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|]')
 RUNTIME_DIR = Path(__file__).resolve().parent
 CREDENTIALS_PATH = RUNTIME_DIR / "asr_credentials.json"
@@ -334,7 +334,7 @@ def save_summary_credentials(values, clear_keys=None):
 
 def validate_endpoint(value, provider):
     parsed = urlparse(str(value or ""))
-    if parsed.scheme != "https":
+    if parsed.scheme != "https" or parsed.username or parsed.password:
         raise ValueError("ASR 接口必须使用 HTTPS")
     host = (parsed.hostname or "").lower()
     if provider == "qwen":
@@ -346,7 +346,35 @@ def validate_endpoint(value, provider):
         allowed = host == "openspeech.bytedance.com"
     if not allowed:
         raise ValueError(f"{provider} ASR 接口域名不受信任")
+    if parsed.query or parsed.fragment:
+        raise ValueError("ASR 接口不能包含查询参数或片段")
     return parsed.geturl()
+
+
+def qwen_asr_protocol(model):
+    value = str(model or "").strip().lower()
+    if value.endswith("filetrans") or (
+        value.startswith("fun-asr")
+        and not value.startswith("fun-asr-flash")
+        and "realtime" not in value
+    ):
+        return "dashscope_async"
+    if value.startswith("fun-asr-flash") or value.startswith(
+        "qwen-audio-3.0-asr-flash"
+    ):
+        return "dashscope_sync"
+    return "openai"
+
+
+def resolve_qwen_asr_endpoint(value, model):
+    parsed = urlparse(validate_endpoint(value, "qwen"))
+    protocol = qwen_asr_protocol(model)
+    paths = {
+        "dashscope_async": "/api/v1/services/audio/asr/transcription",
+        "dashscope_sync": "/api/v1/services/aigc/multimodal-generation/generation",
+        "openai": "/compatible-mode/v1/chat/completions",
+    }
+    return f"{parsed.scheme}://{parsed.netloc}{paths[protocol]}", protocol
 
 
 def request_json(url, body, headers, timeout=4 * 60 * 60, label="ASR API"):
@@ -428,7 +456,8 @@ def qwen_fun_asr_audio_data(message):
     duration = probe_audio_duration(audio_path)
     if duration > FUN_ASR_MAX_DURATION_SECONDS:
         raise RuntimeError(
-            f"Fun-ASR-Flash 单次最多转写 5 分钟，当前音频约 {duration / 60:.1f} 分钟"
+            f"Fun-ASR-Flash 单次最多转写 5 分钟，当前音频约 {duration / 60:.1f} 分钟。"
+            "长播客请改用 qwen-audio-3.0-asr-flash-filetrans"
         )
 
     ffmpeg = find_media_tool("ffmpeg")
@@ -464,22 +493,36 @@ def qwen_fun_asr_audio_data(message):
 
 
 def transcribe_qwen(message, api_key):
-    endpoint = validate_endpoint(message.get("qwenEndpoint"), "qwen")
     model = str(message.get("qwenModel") or "qwen-audio-3.0-asr-flash-filetrans")
-    if model.endswith("filetrans"):
+    endpoint, protocol = resolve_qwen_asr_endpoint(
+        message.get("qwenEndpoint"),
+        model,
+    )
+    if protocol == "dashscope_async":
+        audio_url = str(message.get("url") or "")
+        if model.lower().startswith("qwen3-asr-"):
+            input_data = {"file_url": audio_url}
+            parameters = {
+                "channel_id": [0],
+                "language": str(message.get("language") or "zh"),
+            }
+        else:
+            input_data = {"file_urls": [audio_url]}
+            parameters = {
+                "language_hints": [str(message.get("language") or "zh")],
+            }
         payload, _ = request_json(
             endpoint,
             {
                 "model": model,
-                "input": {"file_urls": [str(message.get("url") or "")]},
-                "parameters": {
-                    "language_hints": [str(message.get("language") or "zh")],
-                },
+                "input": input_data,
+                "parameters": parameters,
             },
             {
                 "Authorization": f"Bearer {api_key}",
                 "X-DashScope-Async": "enable",
             },
+            label=f"Qwen 异步文件转写提交（{endpoint}）",
         )
         task_id = str((payload.get("output") or {}).get("task_id") or "")
         if not task_id:
@@ -526,7 +569,7 @@ def transcribe_qwen(message, api_key):
             time.sleep(2)
         raise TimeoutError("Qwen ASR 转写超时")
 
-    if model.startswith("fun-asr-flash"):
+    if protocol == "dashscope_sync":
         body = {
             "model": model,
             "input": {
@@ -557,6 +600,7 @@ def transcribe_qwen(message, api_key):
                 "Authorization": f"Bearer {api_key}",
                 "X-DashScope-SSE": "disable",
             },
+            label=f"Qwen 同步语音识别（{endpoint}）",
         )
         text = str((payload.get("output") or {}).get("text") or "").strip()
         if not text:
@@ -588,6 +632,7 @@ def transcribe_qwen(message, api_key):
         endpoint,
         body,
         {"Authorization": f"Bearer {api_key}"},
+        label=f"Qwen OpenAI 兼容语音识别（{endpoint}）",
     )
     try:
         return str(payload["choices"][0]["message"]["content"]).strip()
