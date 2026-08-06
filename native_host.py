@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|]')
 RUNTIME_DIR = Path(__file__).resolve().parent
 CREDENTIALS_PATH = RUNTIME_DIR / "asr_credentials.json"
@@ -377,6 +377,26 @@ def resolve_qwen_asr_endpoint(value, model):
     return f"{parsed.scheme}://{parsed.netloc}{paths[protocol]}", protocol
 
 
+def qwen_async_fallback_endpoint(endpoint):
+    parsed = urlparse(str(endpoint or ""))
+    host = (parsed.hostname or "").lower()
+    if host.endswith(".cn-beijing.maas.aliyuncs.com"):
+        fallback_host = "dashscope.aliyuncs.com"
+    elif host.endswith(".ap-southeast-1.maas.aliyuncs.com"):
+        fallback_host = "dashscope-intl.aliyuncs.com"
+    else:
+        return ""
+    return f"https://{fallback_host}/api/v1/services/audio/asr/transcription"
+
+
+def is_async_unsupported_error(error):
+    message = str(error or "").lower()
+    return (
+        "accessdenied" in message
+        and "does not support asynchronous calls" in message
+    )
+
+
 def request_json(url, body, headers, timeout=4 * 60 * 60, label="ASR API"):
     request = urllib.request.Request(
         url,
@@ -511,19 +531,27 @@ def transcribe_qwen(message, api_key):
             parameters = {
                 "language_hints": [str(message.get("language") or "zh")],
             }
-        payload, _ = request_json(
-            endpoint,
-            {
-                "model": model,
-                "input": input_data,
-                "parameters": parameters,
-            },
-            {
-                "Authorization": f"Bearer {api_key}",
-                "X-DashScope-Async": "enable",
-            },
-            label=f"Qwen 异步文件转写提交（{endpoint}）",
-        )
+        try:
+            payload, _ = request_json(
+                endpoint,
+                {
+                    "model": model,
+                    "input": input_data,
+                    "parameters": parameters,
+                },
+                {
+                    "Authorization": f"Bearer {api_key}",
+                    "X-DashScope-Async": "enable",
+                },
+                label=f"Qwen 异步文件转写提交（{endpoint}）",
+            )
+        except RuntimeError as error:
+            fallback = qwen_async_fallback_endpoint(endpoint)
+            if fallback and is_async_unsupported_error(error):
+                retry_message = dict(message)
+                retry_message["qwenEndpoint"] = fallback
+                return transcribe_qwen(retry_message, api_key)
+            raise
         task_id = str((payload.get("output") or {}).get("task_id") or "")
         if not task_id:
             raise RuntimeError(
@@ -533,13 +561,21 @@ def transcribe_qwen(message, api_key):
         query_url = f"{parsed.scheme}://{parsed.netloc}/api/v1/tasks/{task_id}"
         deadline = time.monotonic() + 4 * 60 * 60
         while time.monotonic() < deadline:
-            task = get_json(
-                query_url,
-                {
-                    "Authorization": f"Bearer {api_key}",
-                    "X-DashScope-Async": "enable",
-                },
-            )
+            try:
+                task = get_json(
+                    query_url,
+                    {
+                        "Authorization": f"Bearer {api_key}",
+                        "X-DashScope-Async": "enable",
+                    },
+                )
+            except RuntimeError as error:
+                fallback = qwen_async_fallback_endpoint(endpoint)
+                if fallback and is_async_unsupported_error(error):
+                    retry_message = dict(message)
+                    retry_message["qwenEndpoint"] = fallback
+                    return transcribe_qwen(retry_message, api_key)
+                raise
             output = task.get("output") or {}
             status = output.get("task_status")
             if status == "SUCCEEDED":

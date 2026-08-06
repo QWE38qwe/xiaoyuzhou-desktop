@@ -200,7 +200,7 @@ done
 
 ### Qwen ASR 404
 
-`0.3.1` 起，扩展会根据模型自动补全 Qwen ASR 的服务路径。若仍返回 404：
+`0.3.1` 起，扩展会根据模型自动补全 Qwen ASR 的服务路径。`0.3.2` 起，若 Workspace 专属域名明确不支持异步查询，文件转写会自动切换到同地域官方通用域名。若仍返回 404 或 403：
 
 1. 确认接口域名与 API Key 属于同一地域或 Workspace。
 2. 优先填写 Base URL，不要手工混用 `audio/asr/transcription`、`multimodal-generation/generation` 和 `chat/completions`。
