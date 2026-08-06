@@ -132,7 +132,7 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 | Kimi | `https://api.moonshot.cn/v1/chat/completions` | `kimi-k2.6` |
 | GLM | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | `glm-5.2` |
 
-接口地址和模型均可在设置页修改。Native Host 只接受对应 Provider 的官方 HTTPS `chat/completions` 域名。
+接口地址和模型均可在设置页修改。支持填写 API Base URL 或完整 `chat/completions` 地址，Native Host 会在对应 Provider 的官方 HTTPS 域名上自动补全路径。
 
 下载音频是独立操作，用户不需要在 ASR 前手动下载。Qwen 可直接使用音频 URL；豆包处理部分 M4A 时，Native Host 会在后台下载并转换音频。点击“AI 总结”时，扩展会复用同一单集已有的转写稿；没有转写稿时按 `ASR → AI 总结` 自动执行。内置 Prompt 输出一句话摘要、核心结论、内容脉络、关键观点与依据、行动项、人物与术语和不确定信息。内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
 

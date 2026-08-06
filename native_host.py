@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|]')
 RUNTIME_DIR = Path(__file__).resolve().parent
 CREDENTIALS_PATH = RUNTIME_DIR / "asr_credentials.json"
@@ -776,11 +776,21 @@ def validate_summary_endpoint(value, provider):
         allowed = host in allowed_hosts.get(provider, set())
     if not allowed:
         raise ValueError(f"{provider} AI 总结接口域名不受信任")
-    if not parsed.path.rstrip("/").endswith("/chat/completions"):
-        raise ValueError("AI 总结接口必须指向 chat/completions")
     if parsed.query or parsed.fragment:
         raise ValueError("AI 总结接口不能包含查询参数或片段")
-    return parsed.geturl()
+    if parsed.path.rstrip("/").endswith("/chat/completions"):
+        return parsed.geturl().rstrip("/")
+    paths = {
+        "qwen": "/compatible-mode/v1/chat/completions",
+        "doubao": "/api/v3/chat/completions",
+        "deepseek": "/chat/completions",
+        "kimi": "/v1/chat/completions",
+        "glm": "/api/paas/v4/chat/completions",
+    }
+    path = paths.get(provider)
+    if not path:
+        raise ValueError("不支持的 AI 总结 Provider")
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
 def summary_api_key(credentials, provider):

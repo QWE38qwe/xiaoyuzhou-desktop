@@ -577,7 +577,7 @@ function renderSettingsPage(root) {
       <label>${provider.label} API Key
         <div class="credential-row"><input id="summary-${provider.id}-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /><button class="mini-button" type="button" data-clear-summary-key="${provider.keyField}">清除</button></div>
       </label>
-      <label>接口地址<input id="summary-${provider.id}-endpoint" type="url" value="${esc(config.endpoint || "")}" /></label>
+      <label>API Base URL 或完整地址<input id="summary-${provider.id}-endpoint" type="url" value="${esc(config.endpoint || "")}" /></label>
       <label>模型<input id="summary-${provider.id}-model" type="text" value="${esc(config.model || "")}" /></label>
     </div>`;
   }).join("");
