@@ -75,6 +75,7 @@ const DEFAULT_SETTINGS = {
   downloadSaveAs: false,
   asrProvider: "qwen",
   asrSettingsVersion: ASR_SETTINGS_VERSION,
+  localQwenModel: "Qwen/Qwen3-ASR-0.6B",
   qwenAsrEndpoint: "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription",
   qwenAsrModel: "qwen-audio-3.0-asr-flash-filetrans",
   doubaoAsrEndpoint: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
@@ -374,6 +375,7 @@ async function transcribeAudio({ url, filename, baseName, language = "zh" }) {
     audioDirectory,
     transcriptDirectory,
     language,
+    localQwenModel: settings.localQwenModel,
     qwenEndpoint: settings.qwenAsrEndpoint,
     qwenModel: settings.qwenAsrModel,
     doubaoEndpoint: settings.doubaoAsrEndpoint,
@@ -545,7 +547,15 @@ async function updateSettings(next) {
   settings.transcriptDownloadPath = normalizeAbsolutePath(settings.transcriptDownloadPath, "转写稿保存路径");
   settings.summaryDownloadPath = normalizeAbsolutePath(settings.summaryDownloadPath, "AI 总结稿保存路径");
   settings.downloadSaveAs = Boolean(settings.downloadSaveAs);
-  settings.asrProvider = ["qwen", "doubao"].includes(settings.asrProvider) ? settings.asrProvider : "qwen";
+  settings.asrProvider = ["local_qwen", "qwen", "doubao"].includes(settings.asrProvider)
+    ? settings.asrProvider
+    : "qwen";
+  settings.localQwenModel = [
+    "Qwen/Qwen3-ASR-0.6B",
+    "Qwen/Qwen3-ASR-1.7B"
+  ].includes(settings.localQwenModel)
+    ? settings.localQwenModel
+    : "Qwen/Qwen3-ASR-0.6B";
   for (const [provider, config] of Object.entries(settings.summaryProviders)) {
     let endpoint;
     try {

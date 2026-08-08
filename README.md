@@ -1,6 +1,6 @@
 # 小宇宙桌面版（非官方）
 
-一个面向 macOS 的非官方小宇宙 Chrome 扩展，提供独立桌面窗口、节目发现与搜索、订阅管理、音频下载、云端 ASR 转写和多模型 AI 总结。
+一个面向 macOS 的非官方小宇宙 Chrome 扩展，提供独立桌面窗口、节目发现与搜索、订阅管理、音频下载、本地或云端 ASR 转写和多模型 AI 总结。
 
 > 本项目与小宇宙官方无隶属、授权或合作关系。请遵守小宇宙及所选云服务的使用条款，并仅处理你有权访问的内容。
 
@@ -24,7 +24,7 @@
 
 ![下载与 ASR 设置](docs/images/settings-asr.png)
 
-音频、ASR 转写稿与 AI 总结稿可分别指定 macOS 绝对保存目录。ASR 支持 Qwen 与豆包；AI 总结支持 Qwen、豆包、DeepSeek、Kimi 和 GLM，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain。
+音频、ASR 转写稿与 AI 总结稿可分别指定 macOS 绝对保存目录。ASR 支持本地 Qwen3-ASR、Qwen API 与豆包 API；AI 总结支持 Qwen、豆包、DeepSeek、Kimi 和 GLM，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain。
 
 ## 功能
 
@@ -32,7 +32,7 @@
 - 查看节目详情及单集列表
 - 播放单集，复制节目或单集链接
 - 下载音频到浏览器默认目录或 macOS 绝对路径
-- 使用 Qwen 或豆包 API 转写长音频
+- 使用本地 Qwen3-ASR、Qwen API 或豆包 API 转写音频
 - 将转写结果保存为本地 Markdown 文档
 - 使用 Qwen、豆包、DeepSeek、Kimi 或 GLM 总结转写稿
 - 管理 AI 总结 Prompt 版本，内置结构化播客总结 Prompt
@@ -44,13 +44,20 @@
 - macOS
 - Google Chrome 110 或更高版本
 - 系统自带的 `/usr/bin/python3`
-- 可选：`ffmpeg`。豆包或 Fun-ASR 处理部分 M4A 音频时需要
-- 如需 ASR 或 AI 总结：对应服务的 API Key
+- 可选：`ffmpeg`。本地 Qwen、豆包或 Fun-ASR 处理 M4A 等格式时需要
+- 可选：`uv`。安装本地 Qwen3-ASR 运行时需要
+- 如使用 ASR API 或 AI 总结：对应服务的 API Key
 
 安装 `ffmpeg`：
 
 ```bash
 brew install ffmpeg
+```
+
+安装 `uv`：
+
+```bash
+brew install uv
 ```
 
 ## 安装
@@ -83,12 +90,28 @@ chmod +x install_native_host.sh
 
 如果移动了仓库目录、扩展 ID 发生变化，需使用新 ID 重新运行安装脚本。
 
+### 4. 可选：安装本地 Qwen3-ASR
+
+本地模式仅支持 Apple Silicon macOS。运行时安装在 Native Host 专属目录，不修改系统 Python：
+
+```bash
+chmod +x install_local_asr.sh
+./install_local_asr.sh
+```
+
+模型在首次使用时下载到 Hugging Face 缓存。设置页可选择：
+
+- `Qwen3-ASR 0.6B`：默认，约 1.2GB 运行内存
+- `Qwen3-ASR 1.7B`：精度更高，约 3.4GB 运行内存
+
+每次转写都会启动独立 Worker，任务完成后退出并释放模型内存，不常驻后台。
+
 ## 使用
 
 1. 点击扩展图标打开桌面窗口
 2. 登录小宇宙账号
 3. 在“设置”中分别配置音频、ASR 转写稿和 AI 总结稿保存目录
-4. 配置 ASR 和 AI 总结服务并保存对应 API Key
+4. 选择本地 Qwen3-ASR、Qwen API 或豆包 API；API 模式需保存对应 API Key
 5. 点击“AI 总结”自动执行缺失的 ASR 转写并生成总结，或在“更多”中单独下载音频、执行 ASR
 6. 也可以在设置页选择已有 Markdown 转写稿直接总结
 
@@ -134,7 +157,7 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 
 接口地址和模型均可在设置页修改。支持填写 API Base URL 或完整 `chat/completions` 地址，Native Host 会在对应 Provider 的官方 HTTPS 域名上自动补全路径。
 
-下载音频是独立操作，用户不需要在 ASR 前手动下载。Qwen 可直接使用音频 URL；豆包处理部分 M4A 时，Native Host 会在后台下载并转换音频。点击“AI 总结”时，扩展会复用同一单集已有的转写稿；没有转写稿时按 `ASR → AI 总结` 自动执行。内置 Prompt 输出一句话摘要、核心结论、内容脉络、关键观点与依据、行动项、人物与术语和不确定信息。内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
+下载音频是独立操作，用户不需要在 ASR 前手动下载。Qwen API 可直接使用音频 URL；本地 Qwen 会把音频下载到临时目录，任务结束即清理；豆包处理部分 M4A 时会在后台下载并转换音频。点击“AI 总结”时，扩展会复用同一单集已有的转写稿；没有转写稿时按 `ASR → AI 总结` 自动执行。内置 Prompt 输出一句话摘要、核心结论、内容脉络、关键观点与依据、行动项、人物与术语和不确定信息。内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
 
 ```text
 原转写稿名称 - AI总结.md
@@ -147,6 +170,7 @@ AI 总结稿目录留空时沿用 ASR 转写稿目录，已有用户升级后不
 - 小宇宙登录凭证保存在 Chrome 扩展本地存储中
 - ASR 和 AI 总结 API Key 由 Native Host 保存到 macOS Keychain，扩展存储和项目文件中不保存明文 Key
 - 从旧版本升级时，Native Host 仅在 Keychain 写入并校验成功后删除旧的 `asr_credentials.json`；迁移失败会保留原文件
+- 选择本地 Qwen3-ASR 时，音频和转写均留在本机，不会自动回退到云端 API
 - 只有主动点击“ASR 转写”或“AI 总结”后，音频 URL 或音频内容才可能发送给所选 ASR 服务
 - 只有主动点击“AI 总结”后，转写稿才会发送给所选 AI 服务；首次执行前会说明 ASR、全文外发与 API 费用
 - 选择已有 Markdown 时，文件会先复制到已配置的转写稿目录；Native Host 只允许总结该目录内的 Markdown
@@ -175,6 +199,7 @@ node --check background.js
 /usr/bin/python3 -m py_compile native_host.py
 /usr/bin/python3 -m json.tool manifest.json >/dev/null
 sh -n install_native_host.sh
+sh -n install_local_asr.sh
 ```
 
 ## 卸载 Native Host
@@ -194,7 +219,7 @@ done
 ## 已知限制
 
 - Native Host 当前仅支持 macOS
-- 本地 Qwen ASR 尚未集成到扩展；当前 ASR 使用 Qwen 或豆包 API
+- 本地 Qwen3-ASR 当前仅支持 Apple Silicon；Intel Mac 请使用 API 模式
 - 本项目依赖非公开稳定性承诺的小宇宙接口，接口变化可能导致部分功能失效
 - 当前未发布到 Chrome Web Store，需要通过开发者模式安装
 

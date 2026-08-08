@@ -6,8 +6,10 @@ DEFAULT_EXTENSION_ID="ggemekebddifkcodgiahcelbboolmfpn"
 EXTENSION_ID="${1:-$DEFAULT_EXTENSION_ID}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 SOURCE_HOST_SCRIPT="$SCRIPT_DIR/native_host.py"
+SOURCE_LOCAL_WORKER="$SCRIPT_DIR/local_asr_worker.py"
 INSTALL_DIR="$HOME/Library/Application Support/Xiaoyuzhou Desktop Native Host"
 HOST_SCRIPT="$INSTALL_DIR/native_host.py"
+LOCAL_WORKER="$INSTALL_DIR/local_asr_worker.py"
 HOST_LAUNCHER="$INSTALL_DIR/native-host"
 MANIFEST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
 MANIFEST_PATH="$MANIFEST_DIR/$HOST_NAME.json"
@@ -22,6 +24,10 @@ esac
 mkdir -p "$INSTALL_DIR"
 cp "$SOURCE_HOST_SCRIPT" "$HOST_SCRIPT"
 chmod +x "$HOST_SCRIPT"
+if [ -f "$SOURCE_LOCAL_WORKER" ]; then
+  cp "$SOURCE_LOCAL_WORKER" "$LOCAL_WORKER"
+  chmod +x "$LOCAL_WORKER"
+fi
 
 cat > "$HOST_LAUNCHER" <<EOF
 #!/bin/sh

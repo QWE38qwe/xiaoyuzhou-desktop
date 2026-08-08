@@ -17,10 +17,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-VERSION = "0.3.3"
+VERSION = "0.4.0"
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|]')
 RUNTIME_DIR = Path(__file__).resolve().parent
 CREDENTIALS_PATH = RUNTIME_DIR / "asr_credentials.json"
+LOCAL_ASR_PYTHON = RUNTIME_DIR / "local-asr-venv" / "bin" / "python"
+LOCAL_ASR_WORKER = RUNTIME_DIR / "local_asr_worker.py"
+LOCAL_QWEN_MODELS = {
+    "Qwen/Qwen3-ASR-0.6B",
+    "Qwen/Qwen3-ASR-1.7B",
+}
 FUN_ASR_MAX_DURATION_SECONDS = 5 * 60
 KEYCHAIN_SERVICE = "com.xiaoyuzhou.desktop"
 KEYCHAIN_ACCOUNTS = {
@@ -301,7 +307,24 @@ def credential_status(credentials=None):
     return {
         "qwenConfigured": bool(values.get("qwenApiKey")),
         "doubaoConfigured": bool(values.get("doubaoApiKey")),
+        "localQwen": local_qwen_status(),
         "summaryConfigured": summary,
+    }
+
+
+def local_qwen_status():
+    cache_root = Path.home() / ".cache" / "huggingface" / "hub"
+    cached_models = {
+        model: any(
+            (cache_root / f"models--{model.replace('/', '--')}" / "snapshots").glob(
+                "*/*.safetensors"
+            )
+        )
+        for model in LOCAL_QWEN_MODELS
+    }
+    return {
+        "available": LOCAL_ASR_PYTHON.is_file() and LOCAL_ASR_WORKER.is_file(),
+        "cachedModels": cached_models,
     }
 
 
@@ -756,6 +779,70 @@ def transcribe_doubao(message, api_key):
     return text
 
 
+def transcribe_local_qwen(message):
+    if not LOCAL_ASR_PYTHON.is_file() or not LOCAL_ASR_WORKER.is_file():
+        raise RuntimeError(
+            "本地 Qwen ASR 尚未安装，请在项目目录执行 ./install_local_asr.sh"
+        )
+    model = str(message.get("localQwenModel") or "Qwen/Qwen3-ASR-0.6B")
+    if model not in LOCAL_QWEN_MODELS:
+        raise ValueError("不支持的本地 Qwen ASR 模型")
+    language = {
+        "zh": "Chinese",
+        "en": "English",
+        "ja": "Japanese",
+        "ko": "Korean",
+    }.get(str(message.get("language") or "").lower(), "Chinese")
+
+    with tempfile.TemporaryDirectory(prefix="xiaoyuzhou-local-asr-") as temporary:
+        downloaded = download_audio(
+            {
+                "url": message.get("url"),
+                "directory": temporary,
+                "filename": message.get("audioFilename") or "audio.m4a",
+            }
+        )
+        environment = dict(os.environ)
+        environment["PATH"] = (
+            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:"
+            + environment.get("PATH", "")
+        )
+        try:
+            result = subprocess.run(
+                [
+                    str(LOCAL_ASR_PYTHON),
+                    str(LOCAL_ASR_WORKER),
+                    "--audio",
+                    downloaded["path"],
+                    "--model",
+                    model,
+                    "--language",
+                    language,
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=4 * 60 * 60,
+                env=environment,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("本地 Qwen ASR 转写超过 4 小时，已停止") from error
+        if result.returncode != 0:
+            detail = result.stderr.strip()[-2000:] or "本地 Worker 异常退出"
+            raise RuntimeError(f"本地 Qwen ASR 失败：{detail}")
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        if not lines:
+            raise RuntimeError("本地 Qwen ASR 未返回结果")
+        try:
+            payload = json.loads(lines[-1])
+        except json.JSONDecodeError as error:
+            raise RuntimeError("本地 Qwen ASR 返回格式异常") from error
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise RuntimeError("本地 Qwen ASR 未返回文本")
+        return text
+
+
 def validate_summary_endpoint(value, provider):
     parsed = urlparse(str(value or ""))
     if parsed.scheme != "https" or parsed.username or parsed.password:
@@ -1015,14 +1102,17 @@ def summarize_remote(message):
 
 def transcribe_remote(message):
     transcript_directory = ensure_directory(message.get("transcriptDirectory"))
-    credentials = load_credentials()
     provider = str(message.get("provider") or "qwen")
-    if provider == "qwen":
+    if provider == "local_qwen":
+        text = transcribe_local_qwen(message)
+    elif provider == "qwen":
+        credentials = load_credentials()
         api_key = credentials.get("qwenApiKey")
         if not api_key:
             raise RuntimeError("请先在设置页配置 Qwen API Key")
         text = transcribe_qwen(message, api_key)
     elif provider == "doubao":
+        credentials = load_credentials()
         api_key = credentials.get("doubaoApiKey")
         if not api_key:
             raise RuntimeError("请先在设置页配置豆包 API Key")

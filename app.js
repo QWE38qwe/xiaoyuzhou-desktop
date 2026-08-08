@@ -603,8 +603,13 @@ function renderSettingsPage(root) {
           <div id="native-host-status" class="native-host-status">正在检测本地文件助手……</div>
         </section>
         <section class="settings-section">
-          <div class="settings-section-heading"><div><div class="route-eyebrow">CLOUD TRANSCRIPTION</div><h3>API 转写</h3></div><p>仅主动触发“ASR 转写”或“AI 总结”后发送音频。</p></div>
-          <label>ASR 服务<select id="asr-provider"><option value="qwen">Qwen ASR</option><option value="doubao">豆包 ASR</option></select></label>
+          <div class="settings-section-heading"><div><div class="route-eyebrow">TRANSCRIPTION</div><h3>ASR 转写</h3></div><p>本地模式不外发音频；API 模式仅在主动触发后发送。</p></div>
+          <label>ASR 服务<select id="asr-provider"><option value="local_qwen">本地 Qwen3-ASR</option><option value="qwen">Qwen API</option><option value="doubao">豆包 API</option></select></label>
+          <div class="provider-settings" data-asr-provider-settings="local_qwen">
+            <label>本地模型<select id="local-qwen-model"><option value="Qwen/Qwen3-ASR-0.6B">Qwen3-ASR 0.6B（推荐，约 1.2GB 内存）</option><option value="Qwen/Qwen3-ASR-1.7B">Qwen3-ASR 1.7B（高精度，约 3.4GB 内存）</option></select></label>
+            <div id="local-qwen-status" class="native-host-status">正在检查本地 Qwen ASR……</div>
+            <p class="field-hint">运行时按任务启动，完成后退出释放模型内存。首次使用可能下载模型；安装命令：<code>./install_local_asr.sh</code>。</p>
+          </div>
           <div class="provider-settings" data-asr-provider-settings="qwen">
             <label>Qwen API Key<input id="qwen-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /></label>
             <label>API Base URL 或完整地址<input id="qwen-asr-endpoint" type="url" value="${esc(settings.qwenAsrEndpoint || "")}" placeholder="https://dashscope.aliyuncs.com/api/v1" /></label>
@@ -665,6 +670,19 @@ function renderSettingsPage(root) {
     </section>`;
   $("#api-mode").value = settings.apiMode || "direct";
   $("#asr-provider").value = settings.asrProvider || "qwen";
+  $("#local-qwen-model").value = settings.localQwenModel || "Qwen/Qwen3-ASR-0.6B";
+  let nativeStatus = null;
+  const renderLocalQwenStatus = () => {
+    const localNode = $("#local-qwen-status");
+    if (!localNode || !nativeStatus) return;
+    const model = $("#local-qwen-model").value;
+    const cached = Boolean(nativeStatus.localQwen?.cachedModels?.[model]);
+    localNode.classList.toggle("is-ready", nativeStatus.localQwen?.available);
+    localNode.textContent = nativeStatus.localQwen?.available
+      ? `本地运行时已安装 · 当前模型${cached ? "已缓存" : "将在首次使用时下载"}`
+      : "本地运行时未安装，请执行 ./install_local_asr.sh";
+  };
+  $("#local-qwen-model").addEventListener("change", renderLocalQwenStatus);
   const updateAsrProviderSettings = () => {
     $$("[data-asr-provider-settings]").forEach((node) => {
       node.hidden = node.dataset.asrProviderSettings !== $("#asr-provider").value;
@@ -738,6 +756,7 @@ function renderSettingsPage(root) {
   });
   $("#settings-form").addEventListener("submit", saveSettings);
   send("get-native-host-status").then((status) => {
+    nativeStatus = status;
     const node = $("#native-host-status");
     if (!node) return;
     node.classList.toggle("is-ready", status.available);
@@ -746,8 +765,9 @@ function renderSettingsPage(root) {
       : `本地文件助手未连接，绝对路径不可用。${status.error || ""}`;
     const providerNode = $("#asr-provider-status");
     if (!providerNode) return;
-    providerNode.classList.toggle("is-ready", status.qwenConfigured || status.doubaoConfigured);
-    providerNode.textContent = `Qwen：${status.qwenConfigured ? "已配置" : "未配置"} · 豆包：${status.doubaoConfigured ? "已配置" : "未配置"}`;
+    providerNode.classList.toggle("is-ready", status.qwenConfigured || status.doubaoConfigured || status.localQwen?.available);
+    providerNode.textContent = `本地 Qwen：${status.localQwen?.available ? "已安装" : "未安装"} · Qwen API：${status.qwenConfigured ? "已配置" : "未配置"} · 豆包 API：${status.doubaoConfigured ? "已配置" : "未配置"}`;
+    renderLocalQwenStatus();
     renderSummaryProviderStatus(status.summaryConfigured || {});
   });
 }
@@ -924,7 +944,11 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
       button.disabled = true;
       button.textContent = "转写中…";
     }
-    const providerLabel = state.settings?.asrProvider === "doubao" ? "豆包" : "Qwen";
+    const providerLabel = state.settings?.asrProvider === "local_qwen"
+      ? "本地 Qwen"
+      : state.settings?.asrProvider === "doubao"
+        ? "豆包"
+        : "Qwen";
     setTranscriptionStatus(`${providerLabel} 长音频转写中，请保持窗口打开`);
     notify(`${providerLabel} ASR 正在转写，请保持窗口打开`);
     const filename = audioFilenameOf(episode);
@@ -961,10 +985,19 @@ function summaryProviderLabel(providerId = state.settings?.summaryProvider) {
   return SUMMARY_PROVIDERS.find((provider) => provider.id === providerId)?.label || providerId || "AI Provider";
 }
 
+function asrProviderLabel(providerId = state.settings?.asrProvider) {
+  return {
+    local_qwen: "本机 Qwen3-ASR（音频不外发）",
+    qwen: "Qwen API",
+    doubao: "豆包 API"
+  }[providerId] || "当前 ASR 服务";
+}
+
 function ensureSummaryConsent() {
   if (state.settings?.summaryConsentAccepted) return Promise.resolve(true);
   const dialog = $("#summary-consent-dialog");
   $("#summary-consent-provider").textContent = summaryProviderLabel();
+  $("#summary-consent-asr").textContent = asrProviderLabel();
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
@@ -1155,6 +1188,7 @@ async function saveSettings(event) {
         summaryDownloadPath: $("#summary-download-path").value.trim(),
         downloadSaveAs: $("#download-save-as").checked,
         asrProvider: $("#asr-provider").value,
+        localQwenModel: $("#local-qwen-model").value,
         qwenAsrEndpoint: $("#qwen-asr-endpoint").value.trim(),
         qwenAsrModel: $("#qwen-asr-model").value.trim(),
         doubaoAsrEndpoint: $("#doubao-asr-endpoint").value.trim(),
@@ -1173,8 +1207,8 @@ async function saveSettings(event) {
     });
     const providerNode = $("#asr-provider-status");
     if (providerNode) {
-      providerNode.classList.toggle("is-ready", asrCredentialStatus.qwenConfigured || asrCredentialStatus.doubaoConfigured);
-      providerNode.textContent = `Qwen：${asrCredentialStatus.qwenConfigured ? "已配置" : "未配置"} · 豆包：${asrCredentialStatus.doubaoConfigured ? "已配置" : "未配置"}`;
+      providerNode.classList.toggle("is-ready", asrCredentialStatus.qwenConfigured || asrCredentialStatus.doubaoConfigured || asrCredentialStatus.localQwen?.available);
+      providerNode.textContent = `本地 Qwen：${asrCredentialStatus.localQwen?.available ? "已安装" : "未安装"} · Qwen API：${asrCredentialStatus.qwenConfigured ? "已配置" : "未配置"} · 豆包 API：${asrCredentialStatus.doubaoConfigured ? "已配置" : "未配置"}`;
     }
     renderSummaryProviderStatus(summaryCredentialStatus.summaryConfigured || {});
     $("#audio-download-path").value = state.settings.audioDownloadPath;
