@@ -2,7 +2,7 @@
 set -eu
 
 HOST_NAME="com.xiaoyuzhou.desktop"
-DEFAULT_EXTENSION_ID="ggemekebddifkcodgiahcelbboolmfpn"
+DEFAULT_EXTENSION_ID="jgcegnegoifbcokpipkogolkmodkcceb"
 EXTENSION_ID="${1:-$DEFAULT_EXTENSION_ID}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 SOURCE_HOST_SCRIPT="$SCRIPT_DIR/native_host.py"

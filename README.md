@@ -69,7 +69,9 @@ git clone https://github.com/QWE38qwe/xiaoyuzhou-desktop.git
 cd xiaoyuzhou-desktop
 ```
 
-### 2. 加载 Chrome 扩展
+### 2. 安装 Chrome 扩展
+
+Chrome Web Store 审核通过前，请使用开发者模式：
 
 1. 打开 `chrome://extensions`
 2. 开启右上角“开发者模式”
@@ -81,9 +83,17 @@ cd xiaoyuzhou-desktop
 
 Native Host 用于目录选择、绝对路径下载、Keychain 凭据读写，以及转写稿和总结文档落盘。
 
+Chrome Web Store 安装版使用默认商店扩展 ID：
+
 ```bash
 chmod +x install_native_host.sh
-./install_native_host.sh <你的扩展ID>
+./install_native_host.sh
+```
+
+开发者模式需要传入扩展卡片显示的 ID：
+
+```bash
+./install_native_host.sh <你的开发版扩展ID>
 ```
 
 安装后，在 `chrome://extensions` 中重新加载扩展。
@@ -166,6 +176,8 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 AI 总结稿目录留空时沿用 ASR 转写稿目录，已有用户升级后不会改变原来的输出位置。
 
 ## 隐私与安全
+
+完整隐私政策：[PRIVACY.md](PRIVACY.md)
 
 - 小宇宙登录凭证保存在 Chrome 扩展本地存储中
 - ASR 和 AI 总结 API Key 由 Native Host 保存到 macOS Keychain，扩展存储和项目文件中不保存明文 Key

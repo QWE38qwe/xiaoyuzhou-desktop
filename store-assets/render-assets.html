@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小宇宙桌面版商店素材</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1f2023;
+      --muted: #676961;
+      --paper: #f6f3ec;
+      --yellow: #ffd43b;
+      --cyan: #48b7d3;
+      --coral: #e97e71;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+        "Helvetica Neue", Arial, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    .canvas {
+      position: relative;
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 44px;
+      width: 100vw;
+      height: 100vh;
+      padding: 52px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 8% 92%, rgba(72, 183, 211, 0.24), transparent 21%),
+        radial-gradient(circle at 92% 8%, rgba(255, 212, 59, 0.28), transparent 24%),
+        var(--paper);
+    }
+
+    .copy {
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 18px 0 8px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 20px;
+      font-weight: 750;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: var(--yellow);
+      font-size: 25px;
+      transform: rotate(-8deg);
+    }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: "Songti SC", "STSong", serif;
+      font-size: 42px;
+      font-weight: 700;
+      line-height: 1.14;
+      letter-spacing: -0.04em;
+    }
+
+    .lede {
+      margin: 22px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.65;
+    }
+
+    .privacy {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .privacy::before {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--cyan);
+      content: "";
+    }
+
+    .frame {
+      position: relative;
+      align-self: center;
+      width: 100%;
+      padding: 10px;
+      overflow: hidden;
+      border: 1px solid rgba(31, 32, 35, 0.12);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 28px 80px rgba(31, 32, 35, 0.16);
+    }
+
+    .frame img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 688px;
+      border-radius: 12px;
+      object-fit: cover;
+      object-position: center;
+    }
+
+    body[data-shot="settings"] .frame img {
+      height: 688px;
+      object-position: center 54%;
+    }
+
+    .promo {
+      position: relative;
+      display: none;
+      width: 100vw;
+      height: 100vh;
+      padding: 30px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 90% 15%, rgba(72, 183, 211, 0.35), transparent 35%),
+        var(--ink);
+      color: white;
+    }
+
+    .promo .mark {
+      width: 46px;
+      height: 46px;
+      margin-bottom: 32px;
+      color: var(--ink);
+    }
+
+    .promo h1 {
+      width: 300px;
+      font-size: 34px;
+      line-height: 1.08;
+    }
+
+    .promo p {
+      margin: 15px 0 0;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 15px;
+    }
+
+    .promo-art {
+      position: absolute;
+      right: -36px;
+      bottom: -36px;
+      width: 210px;
+      height: 210px;
+      border: 42px solid var(--yellow);
+      border-radius: 50%;
+    }
+
+    body[data-shot="promo"] .canvas {
+      display: none;
+    }
+
+    body[data-shot="promo"] .promo {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <main class="canvas">
+    <section class="copy">
+      <div class="brand">
+        <span class="mark">≡</span>
+        <span>小宇宙桌面版</span>
+      </div>
+      <div>
+        <p class="eyebrow" id="eyebrow"></p>
+        <h1 id="title"></h1>
+        <p class="lede" id="lede"></p>
+      </div>
+      <div class="privacy">非官方 · 开源 · 数据处理可控</div>
+    </section>
+    <section class="frame">
+      <img id="screenshot" alt="">
+    </section>
+  </main>
+  <main class="promo">
+    <span class="mark">≡</span>
+    <h1>把播客交给<br>下一段故事</h1>
+    <p>发现 · 播放 · 转写 · 总结</p>
+    <div class="promo-art"></div>
+  </main>
+  <script>
+    const shots = {
+      discover: {
+        eyebrow: "Discover & Listen",
+        title: "发现好内容，沉浸地听",
+        lede: "发现、搜索、订阅和播放，都在一个独立桌面窗口里。",
+        image: "../docs/images/discover-player.png"
+      },
+      detail: {
+        eyebrow: "Podcast Archive",
+        title: "节目与单集，一目了然",
+        lede: "进入节目详情，快速播放、下载或整理每一期内容。",
+        image: "../docs/images/podcast-detail.png"
+      },
+      settings: {
+        eyebrow: "Local First",
+        title: "转写与总结，由你选择",
+        lede: "本地 Qwen 或云端 API，密钥保存在 macOS Keychain。",
+        image: "../docs/images/settings-asr.png"
+      }
+    };
+    const shot = new URLSearchParams(location.search).get("shot") || "discover";
+    document.body.dataset.shot = shot;
+    if (shots[shot]) {
+      document.querySelector("#eyebrow").textContent = shots[shot].eyebrow;
+      document.querySelector("#title").textContent = shots[shot].title;
+      document.querySelector("#lede").textContent = shots[shot].lede;
+      document.querySelector("#screenshot").src = shots[shot].image;
+      document.querySelector("#screenshot").alt = shots[shot].title;
+    }
+  </script>
+</body>
+</html>
