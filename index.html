@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#202024">
+    <meta
+      name="description"
+      content="小宇宙桌面版交互演示：发现、播放、ASR 转写与 AI 总结。"
+    >
+    <title>小宇宙桌面版 · 交互演示</title>
+    <link rel="stylesheet" href="./demo.css">
+  </head>
+  <body>
+    <div class="demo-banner">
+      <span>INTERACTIVE DEMO</span>
+      <p>虚构数据 · 不连接真实账号 · 不调用外部模型</p>
+      <a href="https://github.com/QWE38qwe/xiaoyuzhou-desktop">查看源码 ↗</a>
+    </div>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <button
+          id="sidebar-toggle"
+          class="sidebar-toggle"
+          type="button"
+          aria-label="折叠侧栏"
+          aria-expanded="true"
+        >‹</button>
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <div class="brand-copy">
+            <strong>小宇宙</strong>
+            <span>DESKTOP LISTENING ROOM</span>
+          </div>
+        </div>
+        <nav class="main-nav" aria-label="主导航">
+          <button class="nav-item is-active" data-route="discover">
+            <span class="nav-icon">✦</span><span class="nav-label">发现</span>
+          </button>
+          <button class="nav-item" data-route="search">
+            <span class="nav-icon">⌕</span><span class="nav-label">搜索</span>
+          </button>
+          <button class="nav-item" data-route="subscriptions">
+            <span class="nav-icon">◒</span><span class="nav-label">我的订阅</span>
+          </button>
+          <button class="nav-item" data-route="settings">
+            <span class="nav-icon">⚙</span><span class="nav-label">设置</span>
+          </button>
+        </nav>
+        <div class="sidebar-rule"></div>
+        <div class="sidebar-note">
+          <i></i>
+          <span>把耳朵交给<br>下一段故事</span>
+        </div>
+      </aside>
+
+      <main class="main-column">
+        <header class="topbar">
+          <button id="back-button" class="back-button" type="button" hidden>←</button>
+          <div class="route-context">
+            <span id="route-eyebrow">EXPLORE</span>
+            <strong id="route-title">发现</strong>
+          </div>
+          <div class="topbar-actions">
+            <span class="local-state"><i></i> 演示数据已就绪</span>
+            <button id="demo-help" class="ghost-button" type="button">演示说明</button>
+          </div>
+        </header>
+        <section id="page-content" class="page-content" aria-live="polite"></section>
+      </main>
+
+      <footer class="player-bar" aria-label="演示播放器">
+        <div class="now-playing">
+          <div id="player-cover" class="player-cover cover-cyan"><span>AI</span></div>
+          <div class="player-copy">
+            <strong id="player-title">AI 工具如何进入日常工作流</strong>
+            <span id="player-subtitle">技术与人 · 正在播放</span>
+            <em id="pipeline-status"></em>
+          </div>
+        </div>
+        <div class="player-controls">
+          <button id="skip-back" type="button" aria-label="后退 15 秒">↶<small>15</small></button>
+          <button id="play-button" class="play-button" type="button" aria-label="播放或暂停">▶</button>
+          <button id="skip-forward" type="button" aria-label="前进 30 秒">↷<small>30</small></button>
+        </div>
+        <div class="player-progress">
+          <span id="current-time">12:34</span>
+          <input id="progress" type="range" min="0" max="100" value="26" aria-label="播放进度">
+          <span id="duration">48:20</span>
+        </div>
+        <div class="player-actions">
+          <button id="view-podcast" type="button">查看节目</button>
+          <button id="summarize" class="accent-button" type="button">AI 总结</button>
+          <details class="more-menu">
+            <summary aria-label="更多操作">⋮</summary>
+            <div>
+              <button id="download-demo" type="button">下载音频</button>
+              <button id="transcribe-demo" type="button">ASR 转写</button>
+              <button id="copy-demo" type="button">复制单集链接</button>
+              <button id="speed-demo" type="button">播放速度 · 1×</button>
+            </div>
+          </details>
+        </div>
+      </footer>
+    </div>
+
+    <dialog id="summary-dialog" class="summary-dialog">
+      <div class="dialog-shell">
+        <button class="dialog-close" type="button" aria-label="关闭">×</button>
+        <div class="dialog-heading">
+          <span>AI SUMMARY · LOCAL DEMO</span>
+          <h2 id="summary-title">正在整理这一期</h2>
+          <p id="summary-lead">模拟执行 ASR → 分段总结 → Markdown 归档</p>
+        </div>
+        <div id="pipeline" class="pipeline">
+          <div data-step="audio"><i>1</i><span>读取音频</span><b>等待</b></div>
+          <div data-step="asr"><i>2</i><span>Qwen3-ASR 转写</span><b>等待</b></div>
+          <div data-step="summary"><i>3</i><span>结构化总结</span><b>等待</b></div>
+          <div data-step="markdown"><i>4</i><span>保存 Markdown</span><b>等待</b></div>
+        </div>
+        <article id="summary-result" class="summary-result" hidden>
+          <div class="result-toolbar">
+            <span>AI 工具如何进入日常工作流 - AI总结.md</span>
+            <button id="copy-summary" type="button">复制 Markdown</button>
+          </div>
+          <div class="markdown-preview">
+            <h1>AI 工具如何进入日常工作流</h1>
+            <blockquote>AI 的价值不在于替代完整工作，而在于缩短信息整理、初稿生成与验证之间的距离。</blockquote>
+            <h2>核心结论</h2>
+            <ul>
+              <li>先从高频、低风险、结果可检查的任务开始使用 AI。</li>
+              <li>模型输出应进入人工校验闭环，而不是直接成为最终结论。</li>
+              <li>本地处理与云端能力应按隐私敏感度分层选择。</li>
+            </ul>
+            <h2>行动项</h2>
+            <p>选择一个每周重复三次以上的信息整理任务，记录引入 AI 前后的时间成本与错误率。</p>
+          </div>
+        </article>
+      </div>
+    </dialog>
+
+    <dialog id="help-dialog" class="help-dialog">
+      <div class="help-card">
+        <button class="dialog-close" type="button" aria-label="关闭">×</button>
+        <span>ABOUT THIS DEMO</span>
+        <h2>这是一个安全的交互演示</h2>
+        <p>页面使用虚构节目和本地模拟流程，不会请求小宇宙接口，不会上传音频，也不需要 API Key。</p>
+        <ul>
+          <li>点击卡片进入节目详情</li>
+          <li>使用底部播放器模拟播放</li>
+          <li>点击“AI 总结”查看完整处理链路</li>
+          <li>在设置页比较本地与云端 ASR</li>
+        </ul>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script src="./demo.js"></script>
+  </body>
+</html>
