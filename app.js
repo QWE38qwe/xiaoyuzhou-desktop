@@ -28,6 +28,7 @@ const state = {
   currentTranscriptEpisodeId: "",
   currentTranscriptSegments: [],
   currentSummaryPath: "",
+  summaryHistory: new Map(),
   summaryPromptDrafts: [],
   summaryPromptEditorId: ""
 };
@@ -55,6 +56,32 @@ function api(endpoint, body = {}, method = "POST") {
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+}
+
+function summaryRecordOf(item) {
+  return state.summaryHistory.get(episodeIdOf(item)) || null;
+}
+
+function summaryActionButton(item, className, actionAttribute) {
+  const eid = episodeIdOf(item);
+  const completed = Boolean(eid && state.summaryHistory.has(eid));
+  return `<button
+    class="${className}${completed ? " is-complete" : ""}"
+    ${actionAttribute}
+    ${eid ? `data-summary-eid="${esc(eid)}"` : ""}
+    title="${completed ? "已有总结，再次点击可重新生成" : "生成 AI 总结"}"
+  >${completed ? "已 AI 总结" : "AI 总结"}</button>`;
+}
+
+function refreshSummaryIndicators(episodeId = "") {
+  const eid = String(episodeId || "");
+  $$("[data-summary-eid]").forEach((button) => {
+    if (button.dataset.summaryEid !== eid) return;
+    button.classList.add("is-complete");
+    button.textContent = "已 AI 总结";
+    button.title = "已有总结，再次点击可重新生成";
+  });
+  if (episodeIdOf(state.current) === eid) updatePlayerLinkButtons(state.current);
 }
 
 function moreActions(content, className = "") {
@@ -324,7 +351,9 @@ function podcastCard(item, index) {
   const subscribed = state.subscribedPids.has(pid);
   const canResolveEpisode = Boolean(episodeIdOf(item) || pid);
   const viewPodcast = canViewPodcast ? `<button class="mini-button" data-card-action="view-podcast">查看节目</button>` : "";
-  const summary = canResolveEpisode ? `<button class="mini-button is-accent" data-card-action="summarize">AI 总结</button>` : "";
+  const summary = canResolveEpisode
+    ? summaryActionButton(item, "mini-button is-accent", 'data-card-action="summarize"')
+    : "";
   const secondaryActions = [
     canViewPodcast ? `<button data-card-action="subscribe" role="menuitem" ${subscribed ? "disabled" : ""}>${subscribed ? "已订阅" : "订阅节目"}</button>` : "",
     canResolveEpisode ? `<button data-card-action="download" role="menuitem">下载音频</button>` : "",
@@ -420,7 +449,7 @@ function searchResultRow(item, index) {
   const actions = item?.type === "USER" ? "" : `
     <button class="row-action" data-row-action="play">播放</button>
     <button class="row-action" data-row-action="view-podcast" ${canViewPodcast ? "" : "disabled"}>查看节目</button>
-    <button class="row-action is-primary" data-row-action="summarize">AI 总结</button>
+    ${summaryActionButton(item, "row-action is-primary", 'data-row-action="summarize"')}
     ${moreActions(secondaryActions, "action-menu-row")}`;
   return `<article class="episode-row" data-index="${index}">
     <div class="episode-thumb">${imageOf(item) ? `<img src="${esc(imageOf(item))}" alt="" />` : ""}</div>
@@ -689,7 +718,7 @@ function podcastEpisodeRow(episode, index) {
     <div class="row-actions">
       <button class="row-action" data-episode-action="play">播放</button>
       <button class="row-action" data-episode-action="view-podcast">查看节目</button>
-      <button class="row-action is-primary" data-episode-action="summarize">AI 总结</button>
+      ${summaryActionButton(episode, "row-action is-primary", 'data-episode-action="summarize"')}
       ${moreActions(secondaryActions, "action-menu-row")}
     </div>
   </article>`;
@@ -752,6 +781,16 @@ function renderSettingsPage(root) {
           <p class="field-hint">实际位置：<code id="summary-path-preview"></code>。三个目录可分别配置。</p>
           <label class="checkbox-row"><input id="download-save-as" type="checkbox" ${settings.downloadSaveAs ? "checked" : ""} /><span>使用浏览器默认目录时，每次下载询问保存位置</span></label>
           <div id="native-host-status" class="native-host-status">正在检测本地文件助手……</div>
+          <div id="native-host-diagnostics" class="native-host-diagnostics">
+            <div><span>扩展 ID</span><code id="native-extension-id">检测中…</code></div>
+            <div><span>Manifest</span><code id="native-manifest-path">检测中…</code></div>
+            <div><span>Host</span><code id="native-host-path">检测中…</code></div>
+            <div><span>安装命令</span><code id="native-install-command">检测中…</code></div>
+            <div class="native-host-actions">
+              <button id="copy-native-install-command" class="mini-button" type="button">复制安装命令</button>
+              <a id="native-host-help" href="https://github.com/QWE38qwe/xiaoyuzhou-desktop#3-安装-native-host" target="_blank" rel="noreferrer">查看安装说明</a>
+            </div>
+          </div>
         </section>
         <section class="settings-section">
           <div class="settings-section-heading"><div><div class="route-eyebrow">TRANSCRIPTION</div><h3>ASR 转写</h3></div><p>本地模式不外发音频；API 模式仅在主动触发后发送。</p></div>
@@ -786,6 +825,8 @@ function renderSettingsPage(root) {
           <div class="settings-section-heading"><div><div class="route-eyebrow">AI SUMMARY</div><h3>AI 总结</h3></div><p>主动触发后发送转写稿，输出独立 Markdown。</p></div>
           <label>总结服务<select id="summary-provider">${summaryProviderOptions}</select></label>
           ${summaryProviderPanels}
+          <label class="checkbox-row"><input id="summary-include-comments" type="checkbox" ${settings.summaryIncludeComments ? "checked" : ""} /><span>总结时补充评论区中的有效观点</span></label>
+          <p class="field-hint">默认关闭。开启后会读取当前单集的公开评论，过滤“沙发、终于更新、等了好久”等低信息内容，再将有效评论发送给当前 AI Provider。</p>
           <div id="summary-provider-status" class="native-host-status">正在检查 AI API 配置……</div>
           <div class="summary-run-row">
             <button id="choose-summary-transcript" class="secondary-button" type="button">选择已有转写稿并总结</button>
@@ -878,6 +919,15 @@ function renderSettingsPage(root) {
       notify(error.message);
     }
   }));
+  $("#copy-native-install-command").addEventListener("click", async () => {
+    const command = $("#native-install-command").textContent;
+    try {
+      await navigator.clipboard.writeText(command);
+      notify("Native Host 安装命令已复制");
+    } catch {
+      notify(command);
+    }
+  });
   $$("[data-clear-summary-key]").forEach((button) => button.addEventListener("click", async () => {
     if (!confirm("确认从 macOS Keychain 删除这个 AI 总结 API Key？")) return;
     try {
@@ -913,7 +963,17 @@ function renderSettingsPage(root) {
     node.classList.toggle("is-ready", status.available);
     node.textContent = status.available
       ? `本地文件助手已连接 · ${status.version || "可用"}`
-      : `本地文件助手未连接，绝对路径不可用。${status.error || ""}`;
+      : `本地文件助手未连接，目录选择、ASR 和 AI 总结不可用。${status.error || ""}`;
+    $("#native-extension-id").textContent = status.extensionId || "未知";
+    $("#native-manifest-path").textContent = status.manifestPath || "未知";
+    $("#native-host-path").textContent = status.hostPath || "未知";
+    $("#native-install-command").textContent = status.installCommand || "未知";
+    $("#native-host-help").href = status.helpUrl;
+    $$("[data-choose-directory]").forEach((button) => {
+      button.disabled = !status.available;
+      button.title = status.available ? "" : "请先安装并连接 Native Host";
+    });
+    $("#choose-summary-transcript").disabled = !status.available;
     const providerNode = $("#asr-provider-status");
     if (!providerNode) return;
     providerNode.classList.toggle("is-ready", status.qwenConfigured || status.doubaoConfigured || status.localQwen?.available);
@@ -1084,9 +1144,16 @@ function copyPodcastLink(item) {
 
 function updatePlayerLinkButtons(item = null) {
   const hasAudio = Boolean(audioOf(item));
+  const summaryButton = $("#summarize-button");
+  const summarized = Boolean(summaryRecordOf(item));
   $("#download-audio-button").disabled = !hasAudio;
   $("#transcribe-audio-button").disabled = !hasAudio;
-  $("#summarize-button").disabled = !hasAudio;
+  summaryButton.disabled = !hasAudio;
+  summaryButton.textContent = summarized ? "已 AI 总结" : "AI 总结";
+  summaryButton.classList.toggle("is-complete", summarized);
+  summaryButton.title = summarized
+    ? "已有总结，再次点击可重新生成"
+    : "自动转写并总结当前单集";
   $("#view-podcast-button").disabled = !podcastIdOf(item);
   $("#copy-episode-link-button").disabled = !episodeLinkOf(item);
   $("#copy-podcast-link-button").disabled = !podcastLinkOf(item);
@@ -1205,6 +1272,9 @@ function ensureSummaryConsent() {
   const dialog = $("#summary-consent-dialog");
   $("#summary-consent-provider").textContent = summaryProviderLabel();
   $("#summary-consent-asr").textContent = asrProviderLabel();
+  $("#summary-consent-comments").textContent = state.settings?.summaryIncludeComments
+    ? "筛选后的公开评论也会一并发送。"
+    : "评论不会被读取或发送。";
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
@@ -1228,11 +1298,35 @@ function ensureSummaryConsent() {
   });
 }
 
+function ensureResummarize(episode) {
+  const record = summaryRecordOf(episode);
+  if (!record) return Promise.resolve(true);
+  const dialog = $("#resummarize-dialog");
+  const createdAt = record.createdAt
+    ? new Date(record.createdAt).toLocaleString("zh-CN")
+    : "此前";
+  $("#resummarize-detail").textContent = `${createdAt} 已生成过总结。`;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    dialog.addEventListener("close", () => finish(false), { once: true });
+    $("#resummarize-confirm").onclick = () => {
+      finish(true);
+      dialog.close();
+    };
+    dialog.showModal();
+  });
+}
+
 async function summarizeTranscriptPath(
   transcriptPath,
   button = null,
   statusNode = null,
-  { skipConsent = false } = {}
+  { skipConsent = false, episodeId = "" } = {}
 ) {
   if (!transcriptPath) throw new Error("请先生成或选择 Markdown 转写稿");
   if (!skipConsent && !await ensureSummaryConsent()) return null;
@@ -1245,14 +1339,29 @@ async function summarizeTranscriptPath(
     if (statusNode) statusNode.textContent = `${summaryProviderLabel()} 正在总结，请保持窗口打开`;
     setTranscriptionStatus(`${summaryProviderLabel()} AI 正在总结，请保持窗口打开`);
     const result = await send("summarize-transcript", {
-      payload: { transcriptPath }
+      payload: { transcriptPath, episodeId }
     });
     const summaryPath = result.markdown;
     if (!summaryPath) throw new Error("AI 总结完成但未返回 Markdown 路径");
     state.currentSummaryPath = summaryPath;
-    if (statusNode) statusNode.textContent = `总结完成：${summaryPath}`;
-    setTranscriptionStatus(`AI 总结完成：${summaryPath}`, "success");
-    notify(`AI 总结完成：${summaryPath}`);
+    if (episodeId) {
+      state.summaryHistory.set(episodeId, {
+        markdown: summaryPath,
+        provider: result.provider,
+        model: result.model,
+        createdAt: new Date().toISOString(),
+        commentCount: result.commentCount || 0
+      });
+      refreshSummaryIndicators(episodeId);
+    }
+    const commentNote = result.commentWarning
+      ? `；评论补充失败：${result.commentWarning}`
+      : result.commentCount
+        ? `；已补充 ${result.commentCount} 条有效评论`
+        : "";
+    if (statusNode) statusNode.textContent = `总结完成${commentNote}：${summaryPath}`;
+    setTranscriptionStatus(`AI 总结完成${commentNote}：${summaryPath}`, "success");
+    notify(`AI 总结完成${commentNote}`);
     return result;
   } catch (error) {
     if (statusNode) statusNode.textContent = `总结失败：${error.message}`;
@@ -1261,16 +1370,19 @@ async function summarizeTranscriptPath(
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = originalText;
+      const completed = episodeId && state.summaryHistory.has(episodeId);
+      button.textContent = completed ? "已 AI 总结" : originalText;
+      button.classList.toggle("is-complete", Boolean(completed));
     }
   }
 }
 
 async function summarizeEpisode(item, button = null) {
-  if (!await ensureSummaryConsent()) return null;
   const episode = await resolveEpisode(item);
   const eid = episodeIdOf(episode);
   if (!eid || !audioOf(episode)) throw new Error("这集暂时没有可总结的音频");
+  if (!await ensureResummarize(episode)) return null;
+  if (!await ensureSummaryConsent()) return null;
   const hasMatchingTranscript = (
     state.currentTranscriptPath
     && state.currentTranscriptEpisodeId === eid
@@ -1282,7 +1394,7 @@ async function summarizeEpisode(item, button = null) {
     transcriptPath,
     button,
     null,
-    { skipConsent: true }
+    { skipConsent: true, episodeId: eid }
   );
 }
 
@@ -1298,7 +1410,7 @@ async function openEpisode(item) {
       state.currentTranscriptEpisodeId = "";
       state.currentTranscriptSegments = [];
     }
-    state.currentSummaryPath = "";
+    state.currentSummaryPath = summaryRecordOf(episode)?.markdown || "";
     setTranscriptionStatus();
     updatePlayerLinkButtons(episode);
     const player = $("#audio");
@@ -1441,6 +1553,11 @@ async function saveSettings(event) {
         model: $(`#summary-${provider.id}-model`).value.trim()
       }
     ]));
+    const includeComments = $("#summary-include-comments").checked;
+    const keepConsent = Boolean(
+      state.settings.summaryConsentAccepted
+      && (!includeComments || state.settings.summaryIncludeComments)
+    );
     state.settings = await send("update-settings", {
       settings: {
         apiMode: $("#api-mode").value,
@@ -1461,7 +1578,8 @@ async function saveSettings(event) {
         summaryProviders,
         summaryPromptVersions: state.summaryPromptDrafts.map((prompt) => ({ ...prompt })),
         activeSummaryPromptId: state.settings.activeSummaryPromptId,
-        summaryConsentAccepted: Boolean(state.settings.summaryConsentAccepted)
+        summaryConsentAccepted: keepConsent,
+        summaryIncludeComments: includeComments
       }
     });
     $("#qwen-api-key").value = "";
@@ -1545,7 +1663,14 @@ function initPlayer() {
 }
 
 async function init() {
-  [state.auth, state.settings] = await Promise.all([send("get-auth"), send("get-settings")]);
+  const [auth, settings, history] = await Promise.all([
+    send("get-auth"),
+    send("get-settings"),
+    send("get-summary-history")
+  ]);
+  state.auth = auth;
+  state.settings = settings;
+  state.summaryHistory = new Map(Object.entries(history || {}));
   setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
   $("#back-button").hidden = true;
   markConnection(); initPlayer(); renderRoute();

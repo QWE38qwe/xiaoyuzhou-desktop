@@ -36,22 +36,39 @@ EOF
 chmod +x "$HOST_LAUNCHER"
 mkdir -p "$MANIFEST_DIR"
 
-/usr/bin/python3 - "$MANIFEST_PATH" "$HOST_LAUNCHER" "$EXTENSION_ID" <<'PY'
+/usr/bin/python3 - "$MANIFEST_PATH" "$HOST_LAUNCHER" "$DEFAULT_EXTENSION_ID" "$EXTENSION_ID" <<'PY'
 import json
+import re
 import sys
+from pathlib import Path
 
-manifest_path, host_launcher, extension_id = sys.argv[1:]
+manifest_path, host_launcher, default_extension_id, extension_id = sys.argv[1:]
+allowed_origins = {
+    f"chrome-extension://{default_extension_id}/",
+    f"chrome-extension://{extension_id}/",
+}
+path = Path(manifest_path)
+if path.is_file():
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+        allowed_origins.update(
+            origin
+            for origin in current.get("allowed_origins", [])
+            if re.fullmatch(r"chrome-extension://[a-p]{32}/", str(origin))
+        )
+    except (OSError, ValueError, TypeError):
+        pass
 manifest = {
     "name": "com.xiaoyuzhou.desktop",
     "description": "Xiaoyuzhou Desktop local file and ASR helper",
     "path": host_launcher,
     "type": "stdio",
-    "allowed_origins": [f"chrome-extension://{extension_id}/"],
+    "allowed_origins": sorted(allowed_origins),
 }
-with open(manifest_path, "w", encoding="utf-8") as file:
+with path.open("w", encoding="utf-8") as file:
     json.dump(manifest, file, ensure_ascii=False, indent=2)
     file.write("\n")
 PY
 
 echo "本地助手已安装：$MANIFEST_PATH"
-echo "允许的扩展 ID：$EXTENSION_ID"
+echo "已加入扩展 ID：$EXTENSION_ID"

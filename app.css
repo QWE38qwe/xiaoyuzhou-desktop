@@ -147,10 +147,44 @@ button { border: 0; cursor: pointer; }
 
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; }
+.secondary-button:disabled { opacity: .5; }
+.mini-button.is-complete, .row-action.is-complete { background: #e6f1e9; color: #285d3e; }
+.mini-button.is-complete:hover, .row-action.is-complete:hover { background: #d5e9db; }
+.player-link-button.is-complete { background: #e6f1e9 !important; border-color: #b9d5c2 !important; color: #285d3e !important; }
+.native-host-diagnostics { border-top: 1px solid var(--line); display: grid; gap: 8px; padding-top: 12px; }
+.native-host-diagnostics > div:not(.native-host-actions) { align-items: start; display: grid; gap: 8px; grid-template-columns: 78px minmax(0, 1fr); }
+.native-host-diagnostics span { color: var(--ink-soft); font-size: 10px; }
+.native-host-diagnostics code { color: var(--ink); font: 10px/1.55 "DM Mono", monospace; overflow-wrap: anywhere; user-select: text; }
+.native-host-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 3px; }
+.native-host-actions a { color: var(--ink); font-size: 11px; text-underline-offset: 3px; }
 
 @media (max-width: 850px) {
   .episode-content-hero { gap: 24px; grid-template-columns: 170px minmax(0, 1fr); }
   .episode-content-heading h1 { font-size: 29px; }
   .episode-timestamp-row { grid-template-columns: 68px minmax(0, 1fr); }
   .episode-timestamp-row a { grid-column: 2; }
+}
+
+@media (max-width: 650px) {
+  body { min-width: 380px; }
+  .app-shell { --side: 74px; }
+  .sidebar { padding-inline: 12px; }
+  .sidebar-toggle { display: none; }
+  .brand-row { justify-content: center; padding-bottom: 35px; }
+  .brand-row > div:not(.brand-mark), .nav-item > span:not(.nav-icon), .sidebar-note { display: none; }
+  .main-nav { justify-items: center; }
+  .nav-item { justify-content: center; padding-inline: 10px; width: 50px; }
+  .nav-icon { width: auto; }
+  .sidebar-rule { margin-inline: 4px; }
+  .topbar { padding-inline: 18px; }
+  .topbar-actions { gap: 9px; }
+  .page-content { padding: 25px 20px 40px; }
+  .feed-grid { grid-template-columns: 1fr; }
+  .path-input-row, .credential-row { grid-template-columns: 1fr; }
+  .path-input-row .secondary-button, .credential-row .mini-button { justify-self: start; }
+  .settings-section { padding: 16px; }
+  .prompt-meta-grid { grid-template-columns: 1fr; }
+  .native-host-diagnostics > div:not(.native-host-actions) { grid-template-columns: 1fr; gap: 3px; }
+  .player-bar { grid-template-columns: minmax(0, 1fr) auto auto; padding-inline: 12px; }
+  #view-podcast-button, .action-menu-player { display: none; }
 }
