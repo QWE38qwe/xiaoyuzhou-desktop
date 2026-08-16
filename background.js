@@ -354,7 +354,14 @@ function summaryDirectoryFromSettings(settings) {
     || transcriptDirectoryFromSettings(settings);
 }
 
-async function transcribeAudio({ url, filename, baseName, language = "zh" }) {
+async function transcribeAudio({
+  url,
+  filename,
+  baseName,
+  language = "zh",
+  episodeId = "",
+  episodeUrl = ""
+}) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -375,6 +382,8 @@ async function transcribeAudio({ url, filename, baseName, language = "zh" }) {
     audioDirectory,
     transcriptDirectory,
     language,
+    episodeId: String(episodeId || ""),
+    episodeUrl: String(episodeUrl || ""),
     localQwenModel: settings.localQwenModel,
     qwenEndpoint: settings.qwenAsrEndpoint,
     qwenModel: settings.qwenAsrModel,

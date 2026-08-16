@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|]')
 RUNTIME_DIR = Path(__file__).resolve().parent
 CREDENTIALS_PATH = RUNTIME_DIR / "asr_credentials.json"
@@ -111,10 +111,90 @@ def safe_filename(value):
     return name[:180] or "xiaoyuzhou-audio.m4a"
 
 
-def markdown_transcript(title, text):
-    heading = re.sub(r"[\r\n]+", " ", str(title or "转写稿")).strip() or "转写稿"
+def normalize_segments(items, time_unit="seconds"):
+    segments = []
+    multiplier = 0.001 if time_unit == "milliseconds" else 1.0
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        start = item.get("start")
+        if start is None:
+            start = item.get("begin_time")
+        if start is None:
+            start = item.get("start_time")
+        end = item.get("end")
+        if end is None:
+            end = item.get("end_time")
+        if not text or start is None:
+            continue
+        try:
+            start_value = max(0.0, float(start) * multiplier)
+            end_value = max(
+                start_value,
+                float(end if end is not None else start) * multiplier,
+            )
+        except (TypeError, ValueError):
+            continue
+        segments.append(
+            {"start": start_value, "end": end_value, "text": text}
+        )
+    segments.sort(key=lambda item: item["start"])
+    return segments
+
+
+def transcription_result(text, segments=None):
     body = str(text or "").strip()
-    return f"# {heading}\n\n## 转写正文\n\n{body}\n"
+    normalized = list(segments or [])
+    if not body and normalized:
+        body = "\n".join(item["text"] for item in normalized)
+    if not body:
+        raise RuntimeError("ASR 未返回转写文本")
+    return {"text": body, "segments": normalized}
+
+
+def format_timestamp(seconds):
+    value = max(0, int(float(seconds or 0)))
+    hours, remainder = divmod(value, 3600)
+    minutes, tail = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{tail:02d}"
+    return f"{minutes:02d}:{tail:02d}"
+
+
+def timestamp_deep_link(episode_id, seconds):
+    value = str(episode_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        return ""
+    return (
+        f"cosmos://page.cos/shownotes/{value}?t={max(0, int(float(seconds or 0)))}"
+        "&utm_source=xiaoyuzhou_desktop"
+    )
+
+
+def markdown_transcript(title, result, episode_id="", episode_url=""):
+    heading = re.sub(r"[\r\n]+", " ", str(title or "转写稿")).strip() or "转写稿"
+    text = str(result.get("text") or "").strip()
+    segments = list(result.get("segments") or [])
+    lines = [f"# {heading}", ""]
+    source_url = str(episode_url or "").strip()
+    parsed_url = urlparse(source_url)
+    if (
+        parsed_url.scheme == "https"
+        and parsed_url.hostname == "www.xiaoyuzhoufm.com"
+        and not re.search(r"[\s<>]", source_url)
+    ):
+        lines.extend([f"> 原始单集：<{source_url}>", ""])
+    lines.extend(["## 转写正文", ""])
+    if not segments:
+        lines.extend([text, ""])
+        return "\n".join(lines)
+    for segment in segments:
+        label = format_timestamp(segment["start"])
+        deep_link = timestamp_deep_link(episode_id, segment["start"])
+        lines.append(f"[{label}]({deep_link})" if deep_link else f"**{label}**")
+        lines.extend([segment["text"], ""])
+    return "\n".join(lines)
 
 
 def unique_path(directory, filename):
@@ -618,9 +698,19 @@ def transcribe_qwen(message, api_key):
                     for item in transcripts
                     if str(item.get("text") or "").strip()
                 )
-                if not text:
-                    raise RuntimeError("Qwen ASR 未返回转写文本")
-                return text
+                sentence_items = []
+                for transcript in transcripts:
+                    sentence_items.extend(
+                        transcript.get("sentences")
+                        or transcript.get("segments")
+                        or []
+                    )
+                sentence_items.extend(result.get("sentences") or [])
+                segments = normalize_segments(
+                    sentence_items,
+                    time_unit="milliseconds",
+                )
+                return transcription_result(text, segments)
             if status in {"FAILED", "UNKNOWN"}:
                 raise RuntimeError(
                     f"Qwen ASR 任务失败：{json.dumps(output, ensure_ascii=False)[:1000]}"
@@ -666,7 +756,7 @@ def transcribe_qwen(message, api_key):
             raise RuntimeError(
                 f"Qwen Fun-ASR 未返回文本：{json.dumps(payload, ensure_ascii=False)[:1000]}"
             )
-        return text
+        return transcription_result(text)
 
     body = {
         "model": model,
@@ -694,7 +784,9 @@ def transcribe_qwen(message, api_key):
         label=f"Qwen OpenAI 兼容语音识别（{endpoint}）",
     )
     try:
-        return str(payload["choices"][0]["message"]["content"]).strip()
+        return transcription_result(
+            str(payload["choices"][0]["message"]["content"]).strip()
+        )
     except (KeyError, IndexError, TypeError) as error:
         raise RuntimeError(f"Qwen ASR 返回格式异常：{json.dumps(payload, ensure_ascii=False)[:1000]}") from error
 
@@ -754,6 +846,7 @@ def transcribe_doubao(message, api_key):
             "model_name": "bigmodel",
             "enable_itn": True,
             "enable_punc": True,
+            "show_utterances": True,
         },
     }
     payload, headers = request_json(
@@ -773,10 +866,15 @@ def transcribe_doubao(message, api_key):
         raise RuntimeError(
             f"豆包 ASR 失败（{status}）：{headers.get('X-Api-Message', '')}"
         )
-    text = str((payload.get("result") or {}).get("text") or "").strip()
+    result = payload.get("result") or {}
+    text = str(result.get("text") or "").strip()
     if not text:
         raise RuntimeError(f"豆包 ASR 未返回文本：{json.dumps(payload, ensure_ascii=False)[:1000]}")
-    return text
+    segments = normalize_segments(
+        result.get("utterances") or [],
+        time_unit="milliseconds",
+    )
+    return transcription_result(text, segments)
 
 
 def transcribe_local_qwen(message):
@@ -837,10 +935,10 @@ def transcribe_local_qwen(message):
             payload = json.loads(lines[-1])
         except json.JSONDecodeError as error:
             raise RuntimeError("本地 Qwen ASR 返回格式异常") from error
-        text = str(payload.get("text") or "").strip()
-        if not text:
-            raise RuntimeError("本地 Qwen ASR 未返回文本")
-        return text
+        return transcription_result(
+            payload.get("text"),
+            normalize_segments(payload.get("segments") or []),
+        )
 
 
 def validate_summary_endpoint(value, provider):
@@ -1104,29 +1202,38 @@ def transcribe_remote(message):
     transcript_directory = ensure_directory(message.get("transcriptDirectory"))
     provider = str(message.get("provider") or "qwen")
     if provider == "local_qwen":
-        text = transcribe_local_qwen(message)
+        result = transcribe_local_qwen(message)
     elif provider == "qwen":
         credentials = load_credentials()
         api_key = credentials.get("qwenApiKey")
         if not api_key:
             raise RuntimeError("请先在设置页配置 Qwen API Key")
-        text = transcribe_qwen(message, api_key)
+        result = transcribe_qwen(message, api_key)
     elif provider == "doubao":
         credentials = load_credentials()
         api_key = credentials.get("doubaoApiKey")
         if not api_key:
             raise RuntimeError("请先在设置页配置豆包 API Key")
-        text = transcribe_doubao(message, api_key)
+        result = transcribe_doubao(message, api_key)
     else:
         raise ValueError("不支持的 ASR Provider")
 
     base_name = safe_filename(message.get("baseName") or "transcript")
     destination = unique_path(transcript_directory, f"{base_name}.md")
     destination.write_text(
-        markdown_transcript(base_name, text),
+        markdown_transcript(
+            base_name,
+            result,
+            episode_id=message.get("episodeId"),
+            episode_url=message.get("episodeUrl"),
+        ),
         encoding="utf-8",
     )
-    return {"provider": provider, "markdown": str(destination)}
+    return {
+        "provider": provider,
+        "markdown": str(destination),
+        "segmentCount": len(result.get("segments") or []),
+    }
 
 
 def handle_message(message):

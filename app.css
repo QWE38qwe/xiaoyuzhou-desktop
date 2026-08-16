@@ -103,3 +103,54 @@ button { border: 0; cursor: pointer; }
   .podcast-episode-row .row-action { display: inline-block; font-size: 9px; padding-inline: 7px; }
   .row-actions { gap: 4px; }
 }
+
+.code-status { color: var(--ink-soft); font-size: 11px; line-height: 1.6; margin: -3px 0 0; min-height: 18px; }
+.code-status.is-pending { color: #765c16; }
+.code-status.is-success { color: #377551; }
+.code-status.is-error { color: #9a5146; }
+
+.player-progress-track { min-width: 50px; position: relative; width: 100%; }
+.player-progress-track input { display: block; margin: 0; position: relative; z-index: 1; }
+.progress-anchors { inset: 50% 8px auto; pointer-events: none; position: absolute; z-index: 2; }
+.progress-anchors button { background: var(--paper); border: 1px solid var(--ink); border-radius: 50%; height: 8px; left: var(--anchor-position); padding: 0; pointer-events: auto; position: absolute; top: 0; transform: translate(-50%, -50%); transition: background .14s, transform .14s; width: 8px; }
+.progress-anchors button:hover, .progress-anchors button:focus-visible { background: var(--yellow); outline: 2px solid var(--paper); transform: translate(-50%, -50%) scale(1.5); }
+.progress-anchors button.is-active { background: var(--ink); }
+
+.episode-content-page { max-width: 880px; }
+.episode-content-hero { align-items: start; display: grid; gap: 34px; grid-template-columns: 230px minmax(0, 1fr); margin: 5px 0 38px; }
+.episode-content-cover { align-items: center; aspect-ratio: 1; background: var(--yellow); display: flex; font-size: 48px; justify-content: center; overflow: hidden; }
+.episode-content-cover img { height: 100%; object-fit: cover; width: 100%; }
+.episode-content-heading { min-width: 0; padding-top: 3px; }
+.episode-content-heading h1 { font-family: "Noto Serif SC", serif; font-size: 38px; letter-spacing: -.04em; line-height: 1.24; margin: 10px 0 13px; overflow-wrap: anywhere; }
+.episode-podcast-link { background: transparent; color: var(--ink-soft); font-size: 12px; font-weight: 700; padding: 0; text-align: left; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 4px; }
+.episode-podcast-link:hover { color: var(--ink); text-decoration-color: currentColor; }
+.episode-facts { align-items: center; color: var(--ink-soft); display: flex; flex-wrap: wrap; font: 10px/1.5 "DM Mono", monospace; gap: 8px 15px; margin-top: 13px; }
+.episode-facts a { color: var(--ink); overflow-wrap: anywhere; text-underline-offset: 3px; }
+.episode-content-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.episode-content-actions .primary-button { margin-top: 0; min-width: 74px; }
+.episode-chapter-strip { border-block: 1px solid var(--line); display: flex; gap: 1px; margin-bottom: 38px; overflow-x: auto; padding: 10px 0; scrollbar-color: var(--ink-soft) transparent; }
+.episode-chapter-strip button { background: transparent; border-inline-end: 1px solid var(--line); color: var(--ink); display: grid; flex: 0 0 170px; gap: 5px; min-height: 52px; padding: 8px 14px; text-align: left; }
+.episode-chapter-strip button:hover, .episode-chapter-strip button:focus-visible { background: var(--paper-deep); }
+.episode-chapter-strip strong { color: var(--ink-soft); font: 10px "DM Mono", monospace; }
+.episode-chapter-strip span { font-family: "Noto Serif SC", serif; font-size: 12px; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.episode-show-notes { max-width: 760px; }
+.episode-content-body { font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+.episode-content-body > p { color: #454349; margin: 0 0 18px; max-width: 72ch; white-space: pre-wrap; }
+.episode-content-body h2 { font-family: "Noto Serif SC", serif; font-size: 21px; letter-spacing: -.02em; margin: 34px 0 13px; }
+.episode-content-list { color: #454349; display: grid; gap: 7px; margin: 0 0 20px; padding-inline-start: 20px; }
+.episode-timestamp-row { align-items: start; border-top: 1px solid var(--line); display: grid; gap: 12px; grid-template-columns: 72px minmax(0, 1fr) auto; padding: 14px 0; scroll-margin-top: 90px; }
+.episode-timestamp-row:last-child { border-bottom: 1px solid var(--line); }
+.episode-timestamp-row p { color: #454349; line-height: 1.7; margin: 0; min-width: 0; }
+.episode-timestamp-row a { color: var(--ink-soft); font-size: 10px; padding-top: 3px; text-underline-offset: 3px; white-space: nowrap; }
+.timestamp-button { background: var(--ink); border-radius: 4px; color: #fff; font: 10px "DM Mono", monospace; padding: 7px 8px; }
+.timestamp-button:hover { background: var(--yellow); color: var(--ink); }
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+button:disabled { cursor: not-allowed; }
+
+@media (max-width: 850px) {
+  .episode-content-hero { gap: 24px; grid-template-columns: 170px minmax(0, 1fr); }
+  .episode-content-heading h1 { font-size: 29px; }
+  .episode-timestamp-row { grid-template-columns: 68px minmax(0, 1fr); }
+  .episode-timestamp-row a { grid-column: 2; }
+}

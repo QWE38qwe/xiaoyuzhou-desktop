@@ -15,15 +15,18 @@ const state = {
   feed: [],
   subscriptions: [],
   current: null,
+  episodeDetails: new Map(),
   auth: null,
   settings: null,
   searchRequest: 0,
   searchKeyword: "",
   searchResults: null,
   podcastView: null,
+  episodeView: null,
   subscribedPids: new Set(),
   currentTranscriptPath: "",
   currentTranscriptEpisodeId: "",
+  currentTranscriptSegments: [],
   currentSummaryPath: "",
   summaryPromptDrafts: [],
   summaryPromptEditorId: ""
@@ -162,6 +165,35 @@ function audioOf(item) {
   return item?.media?.source?.url || item?.media?.url || item?.enclosure?.url || item?.audioUrl || item?.url || "";
 }
 
+function episodeContentOf(item) {
+  const html = String(item?.shownotes || "");
+  if (html) {
+    const documentValue = new DOMParser().parseFromString(html, "text/html");
+    documentValue.querySelectorAll("[data-timestamp]").forEach((node) => {
+      const seconds = Number(node.getAttribute("data-timestamp"));
+      const label = Number.isFinite(seconds) ? formatTime(seconds) : "";
+      if (label && !String(node.textContent || "").includes(label)) {
+        node.prepend(`${label} `);
+      }
+      node.after(" ");
+    });
+    documentValue.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+    documentValue.querySelectorAll("p, li, h1, h2, h3, h4")
+      .forEach((node) => node.append("\n"));
+    const content = String(documentValue.body.textContent || "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (content) return content;
+  }
+  const plain = item?.description || item?.brief || item?.introduction || "";
+  return String(plain).replace(/\\n/g, "\n").trim();
+}
+
+function durationOf(item) {
+  const value = Number(item?.duration || item?.media?.duration || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 function audioExtensionOf(item) {
   try {
     const extension = new URL(audioOf(item)).pathname.match(/\.(mp3|m4a|wav|ogg|flac|aac|aiff|wma|webm)$/i)?.[1];
@@ -184,8 +216,7 @@ function audioFilenameOf(item) {
 
 function formatTime(seconds) {
   if (!Number.isFinite(seconds)) return "0:00";
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+  return XYZEpisodeContent.formatTimestamp(seconds);
 }
 
 function notify(message) {
@@ -216,6 +247,7 @@ function setSidebarCollapsed(collapsed) {
 
 function setRoute(route) {
   state.podcastView = null;
+  state.episodeView = null;
   state.route = route;
   $$(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.route === route));
   const [eyebrow, title] = routeMeta[route];
@@ -236,6 +268,7 @@ function markConnection() {
 
 function renderRoute() {
   const root = $("#page-content");
+  if (state.episodeView) return renderEpisodePage(root);
   if (state.podcastView) return renderPodcastPage(root);
   if (state.route === "search") return renderSearchPage(root);
   if (state.route === "subscriptions") return renderSubscriptionsPage(root);
@@ -442,6 +475,7 @@ function openPodcast(item) {
   const podcast = podcastOf(item);
   const pid = podcastIdOf(podcast);
   if (!pid) return notify("无法识别这个节目");
+  state.episodeView = null;
   state.podcastView = {
     podcast,
     episodes: null,
@@ -466,6 +500,123 @@ function closePodcast() {
   $("#back-button").hidden = true;
   renderRoute();
   requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: "auto" }));
+}
+
+function closeEpisode() {
+  if (!state.episodeView) return;
+  const { scrollY } = state.episodeView;
+  state.episodeView = null;
+  if (state.podcastView) {
+    $("#route-eyebrow").textContent = "PROGRAM ARCHIVE";
+    $("#route-title").textContent = titleOf(state.podcastView.podcast);
+    $("#back-button").hidden = false;
+  } else {
+    const [eyebrow, title] = routeMeta[state.route];
+    $("#route-eyebrow").textContent = eyebrow;
+    $("#route-title").textContent = title;
+    $("#back-button").hidden = true;
+  }
+  renderRoute();
+  requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: "auto" }));
+}
+
+function timestampDeepLink(item, seconds) {
+  return XYZEpisodeContent.deepLink(episodeIdOf(item), seconds);
+}
+
+function seekToTimestamp(seconds, { scroll = false } = {}) {
+  const audio = $("#audio");
+  if (!audio.src) return notify("当前没有可跳转的播放内容");
+  const target = Math.max(0, Number(seconds) || 0);
+  audio.currentTime = Math.min(target, audio.duration || target);
+  audio.play().catch(() => notify("已定位时间点，请点击播放继续"));
+  updateActiveProgressAnchor(target);
+  if (scroll) {
+    document.querySelector(`[data-content-timestamp="${Math.floor(target)}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+function renderEpisodeContentBlocks(episode) {
+  const content = episodeContentOf(episode);
+  const blocks = XYZEpisodeContent.parseContent(content);
+  if (!blocks.length) return `<div class="empty">这期暂时没有 Show Notes 正文。</div>`;
+  let listOpen = false;
+  const output = [];
+  const closeList = () => {
+    if (listOpen) output.push("</ul>");
+    listOpen = false;
+  };
+
+  blocks.forEach((block) => {
+    if (block.type !== "bullet") closeList();
+    if (block.type === "heading") {
+      output.push(`<h2>${esc(block.text)}</h2>`);
+    } else if (block.type === "timestamp") {
+      const deepLink = timestampDeepLink(episode, block.seconds);
+      output.push(`<div class="episode-timestamp-row" data-content-timestamp="${block.seconds}">
+        <button class="timestamp-button" type="button" data-seek-seconds="${block.seconds}" title="跳转到 ${esc(block.label)}">${esc(block.label)}</button>
+        <p>${esc(block.text || "从这里继续收听")}</p>
+        ${deepLink ? `<a href="${esc(deepLink)}" title="在小宇宙打开这个时间点">小宇宙 ↗</a>` : ""}
+      </div>`);
+    } else if (block.type === "bullet") {
+      if (!listOpen) {
+        output.push('<ul class="episode-content-list">');
+        listOpen = true;
+      }
+      output.push(`<li>${esc(block.text)}</li>`);
+    } else {
+      output.push(`<p>${esc(block.text)}</p>`);
+    }
+  });
+  closeList();
+  return output.join("");
+}
+
+function renderEpisodePage(root) {
+  const episode = state.episodeView.episode;
+  const image = imageOf(episode);
+  const podcastTitle = episode?.podcast?.title || episode?.podcast?.name || "小宇宙节目";
+  const published = episode?.pubDate || episode?.publishedAt || episode?.createdAt || "";
+  const publishedText = published ? new Date(published).toLocaleString("zh-CN", { dateStyle: "medium" }) : "";
+  const sourceUrl = episodeLinkOf(episode);
+  const timeline = XYZEpisodeContent.extractTimeline(episodeContentOf(episode));
+  const duration = durationOf(episode);
+  root.innerHTML = `
+    <article class="episode-content-page">
+      <header class="episode-content-hero">
+        <div class="episode-content-cover">${image ? `<img src="${esc(image)}" alt="${esc(titleOf(episode))}" />` : "<span>◌</span>"}</div>
+        <div class="episode-content-heading">
+          <div class="route-eyebrow">NOW PLAYING · SHOW NOTES</div>
+          <h1>${esc(titleOf(episode))}</h1>
+          <button class="episode-podcast-link" type="button" data-open-current-podcast>${esc(podcastTitle)}</button>
+          <div class="episode-facts">
+            ${duration ? `<span>${esc(formatTime(duration))}</span>` : ""}
+            ${publishedText ? `<span>${esc(publishedText)}</span>` : ""}
+            ${sourceUrl ? `<a href="${esc(sourceUrl)}" target="_blank" rel="noreferrer">真实单集链接 ↗</a>` : ""}
+          </div>
+          <div class="episode-content-actions">
+            <button class="primary-button" type="button" data-toggle-current-play>${$("#audio").paused ? "播放" : "暂停"}</button>
+            <button class="secondary-button" type="button" data-copy-current-link>复制单集链接</button>
+          </div>
+        </div>
+      </header>
+      ${timeline.length ? `<section class="episode-chapter-strip" aria-label="本期时间轴">
+        ${timeline.map((item) => `<button type="button" data-seek-seconds="${item.seconds}"><strong>${esc(item.label)}</strong><span>${esc(item.text || "继续收听")}</span></button>`).join("")}
+      </section>` : ""}
+      <section class="episode-show-notes">
+        <div class="section-heading"><h2>本期内容</h2><span>${timeline.length ? `${timeline.length} TIMESTAMPS` : "SHOW NOTES"}</span></div>
+        <div class="episode-content-body">${renderEpisodeContentBlocks(episode)}</div>
+      </section>
+    </article>`;
+  $$("[data-seek-seconds]", root).forEach((button) => button.addEventListener("click", () => seekToTimestamp(button.dataset.seekSeconds)));
+  $("[data-open-current-podcast]", root)?.addEventListener("click", () => openPodcast(episode));
+  $("[data-toggle-current-play]", root)?.addEventListener("click", (event) => {
+    const audio = $("#audio");
+    if (audio.paused) audio.play().catch(() => notify("播放失败，请稍后重试"));
+    else audio.pause();
+  });
+  $("[data-copy-current-link]", root)?.addEventListener("click", () => copyEpisodeLink(episode));
 }
 
 function renderPodcastPage(root) {
@@ -882,6 +1033,42 @@ function episodeLinkOf(item) {
   return eid ? `https://www.xiaoyuzhoufm.com/episode/${eid}` : "";
 }
 
+function renderPlayerAnchors(item = null) {
+  const holder = $("#progress-anchors");
+  if (!holder) return;
+  const timeline = item ? XYZEpisodeContent.extractTimeline(episodeContentOf(item)) : [];
+  const audioDuration = Number($("#audio")?.duration);
+  const duration = Number.isFinite(audioDuration) && audioDuration > 0
+    ? audioDuration
+    : durationOf(item) || (timeline.at(-1)?.seconds || 0);
+  holder.innerHTML = duration > 0
+    ? timeline.map((entry) => {
+      const left = Math.max(0, Math.min(100, entry.seconds / duration * 100));
+      return `<button
+        type="button"
+        style="--anchor-position:${left}%"
+        data-progress-seconds="${entry.seconds}"
+        title="${esc(`${entry.label} ${entry.text || "继续收听"}`)}"
+        aria-label="${esc(`跳转到 ${entry.label} ${entry.text || ""}`)}"
+      ></button>`;
+    }).join("")
+    : "";
+  $$("[data-progress-seconds]", holder).forEach((button) => {
+    button.addEventListener("click", () => seekToTimestamp(button.dataset.progressSeconds, { scroll: true }));
+  });
+  updateActiveProgressAnchor($("#audio")?.currentTime || 0);
+}
+
+function updateActiveProgressAnchor(seconds) {
+  const anchors = $$("[data-progress-seconds]");
+  let active = null;
+  anchors.forEach((anchor) => {
+    anchor.classList.remove("is-active");
+    if (Number(anchor.dataset.progressSeconds) <= seconds + 0.25) active = anchor;
+  });
+  active?.classList.add("is-active");
+}
+
 async function copyLink(url, label) {
   if (!url) return notify(`当前没有可复制的${label}链接`);
   try { await navigator.clipboard.writeText(url); notify("链接已复制"); } catch { notify(url); }
@@ -915,8 +1102,22 @@ async function resolveEpisode(item) {
     episode = episodes[0] || item;
     eid = episodeIdOf(episode);
   }
-  if (eid && !audioOf(episode)) {
-    episode = unwrapDetail(await api("/episode_detail", { eid }));
+  if (eid && state.episodeDetails.has(eid)) {
+    return state.episodeDetails.get(eid);
+  }
+  if (eid) {
+    try {
+      const detail = unwrapDetail(await api("/episode_detail", { eid }));
+      episode = {
+        ...episode,
+        ...detail,
+        podcast: detail?.podcast || episode?.podcast
+      };
+      state.episodeDetails.set(eid, episode);
+    } catch (error) {
+      if (!audioOf(episode)) throw error;
+      episode = { ...episode, detailLoadError: error.message };
+    }
   }
   return episode;
 }
@@ -957,15 +1158,21 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
         url: audio,
         filename,
         baseName: filename.replace(/\.[^.]+$/, ""),
-        language: "zh"
+        language: "zh",
+        episodeId: episodeIdOf(episode),
+        episodeUrl: episodeLinkOf(episode)
       }
     });
     const transcriptPath = result.markdown || result.md || result.txt;
     if (!transcriptPath) throw new Error("ASR 完成但未返回转写稿路径");
     state.currentTranscriptPath = transcriptPath;
     state.currentTranscriptEpisodeId = episodeIdOf(episode);
+    state.currentTranscriptSegments = [];
     state.currentSummaryPath = "";
-    setTranscriptionStatus(`转写完成：${transcriptPath}`, "success");
+    const timestampNote = result.segmentCount
+      ? ` · ${result.segmentCount} 个时间戳`
+      : " · 当前模型未返回分句时间戳";
+    setTranscriptionStatus(`转写完成${timestampNote}：${transcriptPath}`, "success");
     notify(`转写完成：${transcriptPath}`);
     return transcriptPath;
   } catch (error) {
@@ -1089,6 +1296,7 @@ async function openEpisode(item) {
     if (state.currentTranscriptEpisodeId !== episodeIdOf(episode)) {
       state.currentTranscriptPath = "";
       state.currentTranscriptEpisodeId = "";
+      state.currentTranscriptSegments = [];
     }
     state.currentSummaryPath = "";
     setTranscriptionStatus();
@@ -1099,6 +1307,16 @@ async function openEpisode(item) {
     $("#player-subtitle").textContent = episode?.podcast?.title || episode?.podcast?.name || "小宇宙单集";
     const image = imageOf(episode);
     $("#player-cover").innerHTML = image ? `<img src="${esc(image)}" alt="" />` : "<span>◌</span>";
+    state.episodeView = {
+      episode,
+      scrollY: window.scrollY
+    };
+    $("#route-eyebrow").textContent = "EPISODE NOTES";
+    $("#route-title").textContent = titleOf(episode);
+    $("#back-button").hidden = false;
+    renderPlayerAnchors(episode);
+    renderRoute();
+    window.scrollTo({ top: 0, behavior: "smooth" });
     try { await player.play(); } catch { notify("浏览器阻止了自动播放，请点击播放按钮"); }
   } catch (error) {
     notify(error.message);
@@ -1127,7 +1345,13 @@ async function toggleSubscription(item, button = null) {
   }
 }
 
-function openLogin() { $("#login-error").textContent = ""; $("#login-dialog").showModal(); }
+function openLogin() {
+  $("#login-error").textContent = "";
+  if (!sendCode.timer) {
+    $("#code-status").textContent = "首次登录会自动创建账号，验证码仅发送到小宇宙认证服务。";
+  }
+  $("#login-dialog").showModal();
+}
 
 async function submitLogin(event) {
   event.preventDefault();
@@ -1144,10 +1368,50 @@ async function submitLogin(event) {
 
 async function sendCode() {
   const phone = $("#phone-input").value.trim();
-  if (!phone) return $("#login-error").textContent = "请先填写手机号";
+  const errorNode = $("#login-error");
+  const statusNode = $("#code-status");
   const button = $("#send-code-button");
+  errorNode.textContent = "";
+  if (!/^1\d{10}$/.test(phone)) {
+    errorNode.textContent = "请输入有效的 11 位中国大陆手机号";
+    $("#phone-input").focus();
+    return;
+  }
   button.disabled = true;
-  try { await send("send-code", { payload: { mobilePhoneNumber: phone, areaCode: "+86" } }); notify("验证码已发送"); } catch (error) { $("#login-error").textContent = error.message; } finally { setTimeout(() => { button.disabled = false; }, 30000); }
+  button.textContent = "发送中…";
+  statusNode.className = "code-status is-pending";
+  statusNode.textContent = "正在向小宇宙认证服务请求验证码…";
+  try {
+    await send("send-code", {
+      payload: { mobilePhoneNumber: phone, areaCode: "+86" }
+    });
+    const maskedPhone = `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+    let remaining = 60;
+    statusNode.className = "code-status is-success";
+    statusNode.textContent = `验证码已发送至 ${maskedPhone}，请查收短信。`;
+    button.textContent = `${remaining} 秒后重发`;
+    notify("验证码已发送，请查看短信");
+    clearInterval(sendCode.timer);
+    sendCode.timer = setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) {
+        button.textContent = `${remaining} 秒后重发`;
+        return;
+      }
+      clearInterval(sendCode.timer);
+      sendCode.timer = null;
+      button.disabled = false;
+      button.textContent = "重新发送";
+      statusNode.className = "code-status";
+      statusNode.textContent = "未收到短信？请检查手机号或重新发送验证码。";
+    }, 1000);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "重新发送";
+    statusNode.className = "code-status is-error";
+    statusNode.textContent = "验证码发送失败，请检查网络后重试。";
+    errorNode.textContent = error.message;
+  }
 }
 
 async function saveSettings(event) {
@@ -1258,10 +1522,25 @@ function initPlayer() {
     closePlayerMenu();
     return state.current ? copyPodcastLink(state.current) : notify("当前没有正在播放的节目");
   });
-  audio.addEventListener("play", () => { $("#play-button").textContent = "Ⅱ"; });
-  audio.addEventListener("pause", () => { $("#play-button").textContent = "▶"; });
-  audio.addEventListener("loadedmetadata", () => { $("#duration").textContent = formatTime(audio.duration); });
-  audio.addEventListener("timeupdate", () => { $("#current-time").textContent = formatTime(audio.currentTime); $("#progress").value = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0; });
+  audio.addEventListener("play", () => {
+    $("#play-button").textContent = "Ⅱ";
+    $("[data-toggle-current-play]")?.replaceChildren("暂停");
+  });
+  audio.addEventListener("pause", () => {
+    $("#play-button").textContent = "▶";
+    $("[data-toggle-current-play]")?.replaceChildren("播放");
+  });
+  audio.addEventListener("loadedmetadata", () => {
+    $("#duration").textContent = formatTime(audio.duration);
+    renderPlayerAnchors(state.current);
+  });
+  audio.addEventListener("timeupdate", () => {
+    $("#current-time").textContent = formatTime(audio.currentTime);
+    $("#progress").value = audio.duration
+      ? (audio.currentTime / audio.duration) * 100
+      : 0;
+    updateActiveProgressAnchor(audio.currentTime);
+  });
   $("#progress").addEventListener("input", (event) => { if (audio.duration) audio.currentTime = (event.target.value / 100) * audio.duration; });
 }
 
@@ -1271,7 +1550,10 @@ async function init() {
   $("#back-button").hidden = true;
   markConnection(); initPlayer(); renderRoute();
   $$(".nav-item").forEach((item) => item.addEventListener("click", () => setRoute(item.dataset.route)));
-  $("#back-button").addEventListener("click", closePodcast);
+  $("#back-button").addEventListener("click", () => {
+    if (state.episodeView) closeEpisode();
+    else closePodcast();
+  });
   $("#sidebar-toggle").addEventListener("click", () => setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed")));
   $("#account-button").addEventListener("click", () => state.auth ? send("logout").then(() => { state.auth = null; markConnection(); renderRoute(); notify("已退出登录"); }) : openLogin());
   $("#login-form").addEventListener("submit", submitLogin); $("#send-code-button").addEventListener("click", sendCode);
