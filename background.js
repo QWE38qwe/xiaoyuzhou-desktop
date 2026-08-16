@@ -426,7 +426,8 @@ async function transcribeAudio({
   baseName,
   language = "zh",
   episodeId = "",
-  episodeUrl = ""
+  episodeUrl = "",
+  timeline = []
 }) {
   let parsed;
   try {
@@ -450,6 +451,7 @@ async function transcribeAudio({
     language,
     episodeId: String(episodeId || ""),
     episodeUrl: String(episodeUrl || ""),
+    timeline: Array.isArray(timeline) ? timeline.slice(0, 100) : [],
     localQwenModel: settings.localQwenModel,
     qwenEndpoint: settings.qwenAsrEndpoint,
     qwenModel: settings.qwenAsrModel,

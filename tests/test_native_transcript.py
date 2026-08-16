@@ -15,36 +15,52 @@ class NativeTranscriptTests(unittest.TestCase):
         self.assertEqual([item["start"] for item in segments], [0.5, 2.5])
         self.assertEqual([item["text"] for item in segments], ["第一句", "第二句"])
 
-    def test_markdown_uses_real_episode_links_and_timestamps(self):
+    def test_markdown_uses_program_chapters_not_asr_segments(self):
         markdown = native_host.markdown_transcript(
             "测试单集",
             {
-                "text": "第一句 第二句",
+                "text": "开场第一部分第二部分",
                 "segments": [
-                    {"start": 5, "end": 9, "text": "第一句"},
-                    {"start": 65, "end": 70, "text": "第二句"},
+                    {"start": 5, "end": 9, "text": "开场"},
+                    {"start": 65, "end": 70, "text": "第一部分"},
+                    {"start": 125, "end": 130, "text": "第二部分"},
                 ],
             },
             episode_id="abc_123",
             episode_url="https://www.xiaoyuzhoufm.com/episode/abc_123",
+            timeline=[
+                {"seconds": 60, "title": "话题一"},
+                {"seconds": 120, "title": "话题二"},
+            ],
         )
         self.assertIn(
             "> 原始单集：<https://www.xiaoyuzhoufm.com/episode/abc_123>",
             markdown,
         )
         self.assertIn(
-            "[00:05](cosmos://page.cos/shownotes/abc_123?t=5"
+            "[01:00](cosmos://page.cos/shownotes/abc_123?t=60"
             "&utm_source=xiaoyuzhou_desktop)",
             markdown,
         )
-        self.assertLess(markdown.index("第一句"), markdown.index("第二句"))
+        self.assertIn("### 开场", markdown)
+        self.assertIn("话题一", markdown)
+        self.assertIn("话题二", markdown)
+        self.assertEqual(markdown.count("cosmos://"), 2)
+        self.assertNotIn("?t=5&", markdown)
+        self.assertLess(markdown.index("第一部分"), markdown.index("第二部分"))
 
-    def test_plain_text_fallback_has_no_fake_timestamp(self):
+    def test_no_program_timeline_outputs_continuous_text(self):
         markdown = native_host.markdown_transcript(
             "无时间戳",
-            {"text": "仅有纯文本", "segments": []},
+            {
+                "text": "仅有连续纯文本",
+                "segments": [
+                    {"start": 1, "end": 2, "text": "仅"},
+                    {"start": 2, "end": 3, "text": "有"},
+                ],
+            },
         )
-        self.assertIn("仅有纯文本", markdown)
+        self.assertIn("仅有连续纯文本", markdown)
         self.assertNotIn("cosmos://", markdown)
 
     def test_listener_comments_are_escaped_and_bounded(self):

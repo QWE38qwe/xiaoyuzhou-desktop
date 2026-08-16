@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-VERSION = "0.4.2"
+VERSION = "0.4.3"
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|]')
 RUNTIME_DIR = Path(__file__).resolve().parent
 CREDENTIALS_PATH = RUNTIME_DIR / "asr_credentials.json"
@@ -173,10 +173,91 @@ def timestamp_deep_link(episode_id, seconds):
     )
 
 
-def markdown_transcript(title, result, episode_id="", episode_url=""):
+def normalize_timeline(items):
+    timeline = []
+    seen = set()
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            seconds = max(0, int(float(item.get("seconds") or 0)))
+        except (TypeError, ValueError):
+            continue
+        if seconds in seen:
+            continue
+        seen.add(seconds)
+        title = re.sub(
+            r"\s+",
+            " ",
+            str(item.get("title") or "").replace("\r", " ").replace("\n", " "),
+        ).strip()[:300]
+        timeline.append(
+            {
+                "seconds": seconds,
+                "label": format_timestamp(seconds),
+                "title": title,
+            }
+        )
+    return sorted(timeline, key=lambda item: item["seconds"])[:100]
+
+
+def join_segment_text(segments):
+    output = []
+    previous = None
+    for segment in segments:
+        text = str(segment.get("text") or "").strip()
+        if not text:
+            continue
+        if output and previous:
+            gap = max(0.0, float(segment["start"]) - float(previous["end"]))
+            left = output[-1][-1:] if output[-1] else ""
+            right = text[:1]
+            if gap >= 0.35 and left.isascii() and left.isalnum() and right.isascii() and right.isalnum():
+                output.append(" ")
+        output.append(text)
+        previous = segment
+    return "".join(output).strip()
+
+
+def chaptered_transcript(result, timeline):
+    segments = list(result.get("segments") or [])
+    chapters = normalize_timeline(timeline)
+    if not segments or not chapters:
+        return [], str(result.get("text") or "").strip()
+
+    groups = []
+    first_start = chapters[0]["seconds"]
+    intro = [item for item in segments if float(item["start"]) < first_start]
+    intro_text = join_segment_text(intro)
+    if intro_text:
+        groups.append({"title": "开场", "text": intro_text, "seconds": None})
+
+    for index, chapter in enumerate(chapters):
+        end = (
+            chapters[index + 1]["seconds"]
+            if index + 1 < len(chapters)
+            else float("inf")
+        )
+        content = [
+            item
+            for item in segments
+            if chapter["seconds"] <= float(item["start"]) < end
+        ]
+        text = join_segment_text(content)
+        if text:
+            groups.append({**chapter, "text": text})
+    return groups, ""
+
+
+def markdown_transcript(
+    title,
+    result,
+    episode_id="",
+    episode_url="",
+    timeline=None,
+):
     heading = re.sub(r"[\r\n]+", " ", str(title or "转写稿")).strip() or "转写稿"
     text = str(result.get("text") or "").strip()
-    segments = list(result.get("segments") or [])
     lines = [f"# {heading}", ""]
     source_url = str(episode_url or "").strip()
     parsed_url = urlparse(source_url)
@@ -187,14 +268,20 @@ def markdown_transcript(title, result, episode_id="", episode_url=""):
     ):
         lines.extend([f"> 原始单集：<{source_url}>", ""])
     lines.extend(["## 转写正文", ""])
-    if not segments:
-        lines.extend([text, ""])
+    chapters, fallback = chaptered_transcript(result, timeline)
+    if not chapters:
+        lines.extend([fallback or text, ""])
         return "\n".join(lines)
-    for segment in segments:
-        label = format_timestamp(segment["start"])
-        deep_link = timestamp_deep_link(episode_id, segment["start"])
-        lines.append(f"[{label}]({deep_link})" if deep_link else f"**{label}**")
-        lines.extend([segment["text"], ""])
+    for chapter in chapters:
+        if chapter["seconds"] is None:
+            lines.append("### 开场")
+        else:
+            label = chapter["label"]
+            deep_link = timestamp_deep_link(episode_id, chapter["seconds"])
+            timestamp = f"[{label}]({deep_link})" if deep_link else label
+            suffix = f" {chapter['title']}" if chapter["title"] else ""
+            lines.append(f"### {timestamp}{suffix}")
+        lines.extend(["", chapter["text"], ""])
     return "\n".join(lines)
 
 
@@ -1269,6 +1356,10 @@ def transcribe_remote(message):
         raise ValueError("不支持的 ASR Provider")
 
     base_name = safe_filename(message.get("baseName") or "transcript")
+    chapter_groups, _ = chaptered_transcript(result, message.get("timeline"))
+    chapter_count = sum(
+        1 for item in chapter_groups if item.get("seconds") is not None
+    )
     destination = unique_path(transcript_directory, f"{base_name}.md")
     destination.write_text(
         markdown_transcript(
@@ -1276,13 +1367,14 @@ def transcribe_remote(message):
             result,
             episode_id=message.get("episodeId"),
             episode_url=message.get("episodeUrl"),
+            timeline=message.get("timeline"),
         ),
         encoding="utf-8",
     )
     return {
         "provider": provider,
         "markdown": str(destination),
-        "segmentCount": len(result.get("segments") or []),
+        "chapterCount": chapter_count,
     }
 
 

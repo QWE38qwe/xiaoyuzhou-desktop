@@ -1220,6 +1220,12 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
     setTranscriptionStatus(`${providerLabel} 长音频转写中，请保持窗口打开`);
     notify(`${providerLabel} ASR 正在转写，请保持窗口打开`);
     const filename = audioFilenameOf(episode);
+    const timeline = XYZEpisodeContent.extractTimeline(episodeContentOf(episode))
+      .map((entry) => ({
+        seconds: entry.seconds,
+        label: entry.label,
+        title: entry.text || ""
+      }));
     const result = await send("transcribe-audio", {
       payload: {
         url: audio,
@@ -1227,7 +1233,8 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
         baseName: filename.replace(/\.[^.]+$/, ""),
         language: "zh",
         episodeId: episodeIdOf(episode),
-        episodeUrl: episodeLinkOf(episode)
+        episodeUrl: episodeLinkOf(episode),
+        timeline
       }
     });
     const transcriptPath = result.markdown || result.md || result.txt;
@@ -1236,9 +1243,9 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
     state.currentTranscriptEpisodeId = episodeIdOf(episode);
     state.currentTranscriptSegments = [];
     state.currentSummaryPath = "";
-    const timestampNote = result.segmentCount
-      ? ` · ${result.segmentCount} 个时间戳`
-      : " · 当前模型未返回分句时间戳";
+    const timestampNote = result.chapterCount
+      ? ` · 已按节目时间轴整理为 ${result.chapterCount} 个章节`
+      : " · 节目未提供时间轴，已输出连续文稿";
     setTranscriptionStatus(`转写完成${timestampNote}：${transcriptPath}`, "success");
     notify(`转写完成：${transcriptPath}`);
     return transcriptPath;
