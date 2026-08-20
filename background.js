@@ -10,8 +10,8 @@ const ASR_SETTINGS_VERSION = 2;
 const SUMMARY_SETTINGS_VERSION = 4;
 const DEFAULT_SUMMARY_PROMPT = {
   id: "builtin-podcast-structured-0806-v1",
-  name: "播客结构化总结0806",
-  version: "1.0.3",
+  name: "播客结构化总结",
+  version: "1.0.0",
   builtin: true,
   content: `你是一名专业、克制、以"忠实还原"为最高优先级的播客内容编辑。你的任务是：仅依据下方提供的 ASR 转写稿，产出一份可直接发布的中文 Markdown 总结。转写稿可能存在同音字错误、断句错乱、说话人未标注、口语冗余等问题，请在总结时主动识别并妥善处理，但不得凭空补充原文没有的信息。
 

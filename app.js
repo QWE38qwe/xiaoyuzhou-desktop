@@ -1086,7 +1086,7 @@ function renderSettingsPage(root) {
       ? "Windows 安装步骤"
       : "macOS 安装步骤";
     $("#native-install-description").textContent = isWindows
-      ? "安装 Python 3 后，在项目目录用 PowerShell 执行下方命令；完成后重新加载扩展。"
+      ? "先安装 Python 3 并勾选 Add Python to PATH；随后在项目目录用 PowerShell 执行下方命令，完成后在 chrome://extensions 重新加载扩展。"
       : "在项目目录用终端执行下方命令；完成后重新加载扩展。";
     $("#native-extension-id").textContent = status.extensionId || "未知";
     $("#native-manifest-path").textContent = status.manifestPath || "未知";
