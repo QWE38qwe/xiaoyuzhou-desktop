@@ -1,6 +1,6 @@
 # 隐私政策
 
-生效日期：2026 年 8 月 17 日
+生效日期：2026 年 8 月 20 日
 
 “小宇宙桌面版（非官方）”（以下简称“本扩展”）是一个开源的 Chrome
 扩展，与小宇宙官方无隶属、授权或合作关系。本政策说明本扩展处理哪些数据、
@@ -8,7 +8,7 @@
 
 ## 单一用途
 
-本扩展用于在 macOS 上浏览和播放用户有权访问的小宇宙播客内容，并按用户主动
+本扩展用于在 macOS 或 Windows 上浏览和播放用户有权访问的小宇宙播客内容，并按用户主动
 选择提供音频下载、ASR 转写和 AI 总结能力。
 
 ## 处理的数据
@@ -24,8 +24,8 @@
 
 ### API Key
 
-- 用户填写的 ASR 和 AI 总结 API Key 由可选的 macOS Native Host 保存到
-  macOS Keychain。
+- 用户填写的 ASR 和 AI 总结 API Key 由可选的 Native Host 保存到 macOS
+  Keychain 或 Windows 当前用户 DPAPI 加密文件。
 - API Key 不写入 Chrome 扩展存储、项目仓库或开发者服务器。
 - API Key 仅用于用户选择的服务商接口鉴权。
 
@@ -64,8 +64,8 @@
   退出登录、清除扩展数据或卸载扩展。
 - AI 总结历史按单集保存在 Chrome 扩展本地存储中，仅包含总结文件路径、
   Provider、模型、生成时间和采用评论数量，不保存评论原文。
-- API Key 保存在 macOS Keychain 中，直到用户在设置页清除或手动从 Keychain
-  删除。
+- API Key 保存在 macOS Keychain 或 Windows DPAPI 加密文件中，直到用户在
+  设置页清除或手动删除。
 - 下载的音频、转写稿、总结稿和模型缓存保存在用户选择的本地目录或工具默认
   目录中，直到用户自行删除。
 - 本地 ASR 的临时音频目录会在单次任务结束后清理。
@@ -81,13 +81,13 @@ https://github.com/QWE38qwe/xiaoyuzhou-desktop#卸载-native-host
 - `clipboardWrite`：复制节目和单集链接。
 - `downloads`：将用户主动选择的音频保存到浏览器下载目录。
 - `nativeMessaging`：与用户主动安装的本地助手通信，用于目录选择、绝对路径
-  写入、Keychain 凭据读写、本地 ASR 和 AI API 调用。
+  写入、系统安全凭据读写、本地 ASR（仅 Apple Silicon）和 AI API 调用。
 - 主机权限仅覆盖小宇宙 API、认证服务和媒体 CDN。
 
 ## 安全措施
 
 本扩展使用 Manifest V3，不加载远程 JavaScript。支持的云端接口必须使用
-HTTPS，API Key 由 macOS Keychain 管理。本项目公开源代码，安全问题可通过
+HTTPS，API Key 由 macOS Keychain 或 Windows DPAPI 管理。本项目公开源代码，安全问题可通过
 GitHub Private Vulnerability Reporting 私下报告。
 
 ## 儿童隐私

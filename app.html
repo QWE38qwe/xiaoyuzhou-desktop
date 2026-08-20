@@ -117,6 +117,18 @@
         </div>
       </form>
     </dialog>
+    <dialog id="logout-dialog" class="dialog logout-dialog">
+      <form method="dialog">
+        <button type="button" class="dialog-close" data-close-dialog>×</button>
+        <h2>确认退出登录？</h2>
+        <p class="dialog-lead">退出后将停止同步订阅与收听记录。已下载的音频、转写稿、总结稿和系统安全凭据存储中的 API Key 不会被删除。</p>
+        <div class="logout-warning">你需要重新获取短信验证码才能再次登录。</div>
+        <div class="consent-actions">
+          <button type="button" class="secondary-button" data-close-dialog>取消</button>
+          <button id="logout-confirm" type="button" class="danger-button">确认退出登录</button>
+        </div>
+      </form>
+    </dialog>
     <script src="episode_content.js"></script>
     <script src="app.js"></script>
   </body>

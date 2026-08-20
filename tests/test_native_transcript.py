@@ -19,11 +19,11 @@ class NativeTranscriptTests(unittest.TestCase):
         markdown = native_host.markdown_transcript(
             "测试单集",
             {
-                "text": "开场第一部分第二部分",
+                "text": "开场。第一部分，有标点！第二部分也有。",
                 "segments": [
                     {"start": 5, "end": 9, "text": "开场"},
-                    {"start": 65, "end": 70, "text": "第一部分"},
-                    {"start": 125, "end": 130, "text": "第二部分"},
+                    {"start": 65, "end": 70, "text": "第一部分有标点"},
+                    {"start": 125, "end": 130, "text": "第二部分也有"},
                 ],
             },
             episode_id="abc_123",
@@ -47,6 +47,9 @@ class NativeTranscriptTests(unittest.TestCase):
         self.assertIn("话题二", markdown)
         self.assertEqual(markdown.count("cosmos://"), 2)
         self.assertNotIn("?t=5&", markdown)
+        self.assertIn("开场。", markdown)
+        self.assertIn("第一部分，有标点！", markdown)
+        self.assertIn("第二部分也有。", markdown)
         self.assertLess(markdown.index("第一部分"), markdown.index("第二部分"))
 
     def test_no_program_timeline_outputs_continuous_text(self):
@@ -62,6 +65,30 @@ class NativeTranscriptTests(unittest.TestCase):
         )
         self.assertIn("仅有连续纯文本", markdown)
         self.assertNotIn("cosmos://", markdown)
+
+    def test_pause_based_punctuation_fallback(self):
+        text = native_host.join_segment_text(
+            [
+                {"start": 0.0, "end": 0.5, "text": "第一句"},
+                {"start": 0.9, "end": 1.3, "text": "继续说明"},
+                {"start": 2.2, "end": 2.8, "text": "第二句"},
+            ]
+        )
+        self.assertEqual(text, "第一句，继续说明。第二句")
+
+    def test_topic_sections_preserve_original_headings(self):
+        sections = native_host.split_topic_sections(
+            "# 标题\n\n## 转写正文\n\n"
+            "### 开场\n\n开场内容。\n\n"
+            "### [02:04](cosmos://example?t=124) 话题一\n\n话题内容。\n"
+        )
+        self.assertEqual(len(sections), 2)
+        self.assertEqual(sections[0]["heading"], "开场")
+        self.assertEqual(
+            sections[1]["heading"],
+            "[02:04](cosmos://example?t=124) 话题一",
+        )
+        self.assertEqual(sections[1]["body"], "话题内容。")
 
     def test_listener_comments_are_escaped_and_bounded(self):
         comments = native_host.summary_comments(

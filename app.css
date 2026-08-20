@@ -157,6 +157,12 @@ button:disabled { cursor: not-allowed; }
 .result-description-wrap.is-collapsed .result-description { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .description-toggle { background: transparent; color: var(--ink); font-size: 10px; justify-self: start; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
 .description-toggle:hover { color: var(--ink-soft); }
+.account-button.is-logged:hover { background: #f3e6df; color: #8c342d; }
+.account-button { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.danger-button { background: #a43f35; border-radius: 4px; color: #fff; font-size: 12px; padding: 11px 15px; }
+.danger-button:hover { background: #8c342d; }
+.danger-button:disabled { opacity: .55; }
+.logout-warning { background: #f3e6df; color: #8c342d; font-size: 11px; line-height: 1.65; padding: 10px 12px; }
 .mini-button.is-complete, .row-action.is-complete { background: #e6f1e9; color: #285d3e; }
 .mini-button.is-complete:hover, .row-action.is-complete:hover { background: #d5e9db; }
 .player-link-button.is-complete { background: #e6f1e9 !important; border-color: #b9d5c2 !important; color: #285d3e !important; }
@@ -166,12 +172,29 @@ button:disabled { cursor: not-allowed; }
 .native-host-diagnostics code { color: var(--ink); font: 10px/1.55 "DM Mono", monospace; overflow-wrap: anywhere; user-select: text; }
 .native-host-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 3px; }
 .native-host-actions a { color: var(--ink); font-size: 11px; text-underline-offset: 3px; }
+.settings-tabs { border-bottom: 1px solid var(--line); display: flex; gap: 2px; margin-bottom: 20px; overflow-x: auto; }
+.settings-tabs button { background: transparent; border-bottom: 2px solid transparent; color: var(--ink-soft); flex: 0 0 auto; font-size: 11px; padding: 10px 14px; }
+.settings-tabs button:hover { color: var(--ink); }
+.settings-tabs button.is-active { border-bottom-color: var(--ink); color: var(--ink); font-weight: 700; }
+.settings-panel { background: transparent; border: 0; padding: 4px 0 22px; }
+.settings-panel[hidden] { display: none; }
+.native-install-guide { background: var(--paper-deep); display: grid; gap: 4px; padding: 12px; }
+.native-install-guide strong { font-family: "Noto Serif SC", serif; font-size: 13px; }
+.native-install-guide p { color: var(--ink-soft); font-size: 11px; line-height: 1.65; margin: 0; }
+.setup-steps { border-block: 1px solid var(--line); display: grid; }
+.setup-steps > div { align-items: start; border-bottom: 1px solid var(--line); display: grid; gap: 5px; grid-template-columns: 132px minmax(0, 1fr); padding: 10px 0; }
+.setup-steps > div:last-child { border-bottom: 0; }
+.setup-steps strong { font-size: 11px; }
+.setup-steps span { color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
+.install-command-row { align-items: center; background: var(--paper-deep); display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) auto; padding: 10px; }
+.install-command-row code { font: 10px/1.55 "DM Mono", monospace; overflow-wrap: anywhere; }
 
 @media (max-width: 850px) {
   .episode-content-hero { gap: 24px; grid-template-columns: 170px minmax(0, 1fr); }
   .episode-content-heading h1 { font-size: 29px; }
   .episode-timestamp-row { grid-template-columns: 68px minmax(0, 1fr); }
   .episode-timestamp-row a { grid-column: 2; }
+  .setup-steps > div { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 650px) {
@@ -187,6 +210,7 @@ button:disabled { cursor: not-allowed; }
   .sidebar-rule { margin-inline: 4px; }
   .topbar { padding-inline: 18px; }
   .topbar-actions { gap: 9px; }
+  .account-button { max-width: 120px; }
   .page-content { padding: 25px 20px 40px; }
   .feed-grid { grid-template-columns: 1fr; }
   .path-input-row, .credential-row { grid-template-columns: 1fr; }
@@ -194,6 +218,9 @@ button:disabled { cursor: not-allowed; }
   .settings-section { padding: 16px; }
   .prompt-meta-grid { grid-template-columns: 1fr; }
   .native-host-diagnostics > div:not(.native-host-actions) { grid-template-columns: 1fr; gap: 3px; }
+  .settings-tabs button { padding-inline: 10px; }
+  .install-command-row { grid-template-columns: 1fr; }
+  .install-command-row .mini-button { justify-self: start; }
   .player-bar { grid-template-columns: minmax(0, 1fr) auto auto; padding-inline: 12px; }
   #view-podcast-button, .action-menu-player { display: none; }
 }

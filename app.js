@@ -18,9 +18,10 @@ const state = {
   episodeDetails: new Map(),
   auth: null,
   settings: null,
+  settingsTab: "files",
   searchRequest: 0,
   searchKeyword: "",
-  searchResultsByType: { episode: null, podcast: null, user: null },
+  searchResultsByType: { episode: null, podcast: null },
   searchErrorsByType: {},
   podcastView: null,
   episodeView: null,
@@ -41,11 +42,10 @@ const routeMeta = {
   settings: ["PREFERENCES", "设置"]
 };
 
-const SEARCH_TYPES = ["episode", "podcast", "user"];
+const SEARCH_TYPES = ["episode", "podcast"];
 const SEARCH_TYPE_LABELS = {
   episode: "单集",
-  podcast: "节目",
-  user: "用户"
+  podcast: "节目"
 };
 
 function send(type, payload = {}) {
@@ -297,7 +297,10 @@ function markConnection() {
   node.classList.toggle("is-online", Boolean(state.auth));
   $("#connection-state em").textContent = state.auth ? "已连接" : "未连接";
   const account = $("#account-button");
-  account.textContent = state.auth?.user?.nickname || state.auth?.user?.name || (state.auth ? "已登录" : "登录");
+  const accountName = state.auth?.user?.nickname || state.auth?.user?.name || "";
+  account.textContent = state.auth
+    ? `${accountName || "已登录"} · 退出`
+    : "登录";
   account.classList.toggle("is-logged", Boolean(state.auth));
 }
 
@@ -400,7 +403,7 @@ function bindCardActions(holder, items) {
 function renderSearchPage(root) {
   root.innerHTML = `
     <section><div class="route-eyebrow">SEARCH THE UNIVERSE</div><div class="search-bar"><input id="search-input" type="search" value="${esc(state.searchKeyword)}" placeholder="搜索节目、单集或主播" autocomplete="off" /><button id="search-submit" title="搜索">⌕</button></div>
-    <div class="filter-row"><button class="filter-button" data-search-type="episode">单集</button><button class="filter-button" data-search-type="podcast">节目</button><button class="filter-button" data-search-type="user">用户</button></div><div id="search-results" class="result-list"></div></section>`;
+    <div class="filter-row"><button class="filter-button" data-search-type="episode">单集</button><button class="filter-button" data-search-type="podcast">节目</button></div><div id="search-results" class="result-list"></div></section>`;
   $$("[data-search-type]").forEach((button) => button.classList.toggle("is-active", button.dataset.searchType === state.searchType));
   $$("[data-search-type]").forEach((button) => button.addEventListener("click", () => {
     state.searchType = button.dataset.searchType;
@@ -417,7 +420,7 @@ async function performSearch() {
   const holder = $("#search-results");
   if (!keyword) return notify("先输入一个关键词");
   state.searchKeyword = keyword;
-  state.searchResultsByType = { episode: null, podcast: null, user: null };
+  state.searchResultsByType = { episode: null, podcast: null };
   state.searchErrorsByType = {};
   const requestId = ++state.searchRequest;
   renderSearchResults(holder, { loading: true });
@@ -809,6 +812,8 @@ function bindPodcastEpisodeRows(holder, episodes) {
 
 function renderSettingsPage(root) {
   const settings = state.settings || {};
+  const activeSettingsTab = state.settingsTab || "files";
+  const panelHidden = (id) => activeSettingsTab === id ? "" : "hidden";
   const audioPath = String(settings.audioDownloadPath || "");
   const transcriptPath = String(settings.transcriptDownloadPath || "");
   const summaryPath = String(settings.summaryDownloadPath || "");
@@ -829,9 +834,15 @@ function renderSettingsPage(root) {
   root.innerHTML = `
     <section class="settings-page">
       <div class="section-heading"><h2>设置</h2><span>PREFERENCES</span></div>
+      <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+        <button type="button" role="tab" aria-selected="${activeSettingsTab === "files"}" data-settings-tab="files" class="${activeSettingsTab === "files" ? "is-active" : ""}">文件与助手</button>
+        <button type="button" role="tab" aria-selected="${activeSettingsTab === "asr"}" data-settings-tab="asr" class="${activeSettingsTab === "asr" ? "is-active" : ""}">语音转写</button>
+        <button type="button" role="tab" aria-selected="${activeSettingsTab === "summary"}" data-settings-tab="summary" class="${activeSettingsTab === "summary" ? "is-active" : ""}">AI 总结</button>
+        <button type="button" role="tab" aria-selected="${activeSettingsTab === "advanced"}" data-settings-tab="advanced" class="${activeSettingsTab === "advanced" ? "is-active" : ""}">高级</button>
+      </nav>
       <form id="settings-form" class="settings-form">
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><div class="route-eyebrow">DOWNLOADS</div><h3>下载设置</h3></div><p>音频以浏览器原始文件保存。</p></div>
+        <section class="settings-section settings-panel" data-settings-panel="files" ${panelHidden("files")}>
+          <div class="settings-section-heading"><div><h3>文件与本地助手</h3></div><p>统一管理下载目录和 Native Host。</p></div>
           <label>音频保存目录
             <div class="path-input-row"><input id="audio-download-path" type="text" value="${esc(audioPath)}" placeholder="留空使用浏览器默认下载目录/小宇宙音频" autocomplete="off" /><button type="button" class="secondary-button" data-choose-directory="audio-download-path">选择目录</button></div>
           </label>
@@ -846,7 +857,12 @@ function renderSettingsPage(root) {
           <p class="field-hint">实际位置：<code id="summary-path-preview"></code>。三个目录可分别配置。</p>
           <label class="checkbox-row"><input id="download-save-as" type="checkbox" ${settings.downloadSaveAs ? "checked" : ""} /><span>使用浏览器默认目录时，每次下载询问保存位置</span></label>
           <div id="native-host-status" class="native-host-status">正在检测本地文件助手……</div>
+          <div class="native-install-guide">
+            <strong id="native-install-title">本地助手安装</strong>
+            <p id="native-install-description">正在识别操作系统并生成安装指令……</p>
+          </div>
           <div id="native-host-diagnostics" class="native-host-diagnostics">
+            <div><span>系统</span><code id="native-platform">检测中…</code></div>
             <div><span>扩展 ID</span><code id="native-extension-id">检测中…</code></div>
             <div><span>Manifest</span><code id="native-manifest-path">检测中…</code></div>
             <div><span>Host</span><code id="native-host-path">检测中…</code></div>
@@ -857,13 +873,20 @@ function renderSettingsPage(root) {
             </div>
           </div>
         </section>
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><div class="route-eyebrow">TRANSCRIPTION</div><h3>ASR 转写</h3></div><p>本地模式不外发音频；API 模式仅在主动触发后发送。</p></div>
+        <section class="settings-section settings-panel" data-settings-panel="asr" ${panelHidden("asr")}>
+          <div class="settings-section-heading"><div><h3>语音转写</h3></div><p>选择本地模型或云端 ASR。</p></div>
           <label>ASR 服务<select id="asr-provider"><option value="local_qwen">本地 Qwen3-ASR</option><option value="qwen">Qwen API</option><option value="doubao">豆包 API</option></select></label>
           <div class="provider-settings" data-asr-provider-settings="local_qwen">
             <label>本地模型<select id="local-qwen-model"><option value="Qwen/Qwen3-ASR-0.6B">Qwen3-ASR 0.6B（推荐，约 1.2GB 内存）</option><option value="Qwen/Qwen3-ASR-1.7B">Qwen3-ASR 1.7B（高精度，约 3.4GB 内存）</option></select></label>
             <div id="local-qwen-status" class="native-host-status">正在检查本地 Qwen ASR……</div>
-            <p class="field-hint">运行时按任务启动，完成后退出释放模型内存。首次使用可能下载模型；安装命令：<code>./install_local_asr.sh</code>。</p>
+            <div class="setup-steps">
+              <div><strong>1. 连接本地助手</strong><span>先在“文件与助手”完成 Native Host 安装。</span></div>
+              <div><strong>2. 安装 0.6B 运行时</strong><span>推荐 Apple Silicon Mac 新用户使用，约需 1.2GB 运行内存。</span></div>
+              <div><strong>3. 首次下载模型</strong><span>第一次转写会下载模型；后续直接复用缓存。</span></div>
+              <div><strong>4. 按任务释放内存</strong><span>每次转写结束后 Worker 自动退出，不常驻后台。</span></div>
+            </div>
+            <div class="install-command-row"><code id="local-qwen-install-command">./install_local_asr.sh</code><button id="copy-local-asr-command" class="mini-button" type="button">复制安装命令</button></div>
+            <p class="field-hint">Windows 暂不支持 MLX 本地模型，将自动引导使用 Qwen API 或豆包 API。</p>
           </div>
           <div class="provider-settings" data-asr-provider-settings="qwen">
             <label>Qwen API Key<input id="qwen-api-key" type="password" placeholder="已保存则留空；输入新值会覆盖" autocomplete="new-password" /></label>
@@ -884,10 +907,11 @@ function renderSettingsPage(root) {
             <label>Resource ID<input id="doubao-asr-resource-id" type="text" value="${esc(settings.doubaoAsrResourceId || "volc.bigasr.auc_turbo")}" /></label>
           </div>
           <div id="asr-provider-status" class="native-host-status">正在检查 API 配置……</div>
-          <p class="field-hint">API Key 由 Native Host 保存在 macOS Keychain，扩展不会回显完整密钥。转写会将音频 URL 或音频内容发送至所选服务。</p>
+          <p class="field-hint">转写稿优先保留模型返回的完整标点；模型未返回标点时，会依据语音片段停顿补充基础逗号和句号。</p>
+          <p class="field-hint">API Key 由 Native Host 保存在 <span id="credential-storage-label">系统安全凭据存储</span>，扩展不会回显完整密钥。转写会将音频 URL 或音频内容发送至所选服务。</p>
         </section>
-        <section class="settings-section summary-settings-section">
-          <div class="settings-section-heading"><div><div class="route-eyebrow">AI SUMMARY</div><h3>AI 总结</h3></div><p>主动触发后发送转写稿，输出独立 Markdown。</p></div>
+        <section class="settings-section settings-panel summary-settings-section" data-settings-panel="summary" ${panelHidden("summary")}>
+          <div class="settings-section-heading"><div><h3>AI 总结</h3></div><p>配置模型、评论补充和 Prompt。</p></div>
           <label>总结服务<select id="summary-provider">${summaryProviderOptions}</select></label>
           ${summaryProviderPanels}
           <label class="checkbox-row"><input id="summary-include-comments" type="checkbox" ${settings.summaryIncludeComments ? "checked" : ""} /><span>总结时补充评论区中的有效观点</span></label>
@@ -916,8 +940,8 @@ function renderSettingsPage(root) {
             <p class="field-hint">内置版本只读；自定义版本保存在 Chrome 本地存储。支持占位符 <code>{{title}}</code>。</p>
           </div>
         </section>
-        <section class="settings-section">
-          <div class="settings-section-heading"><div><div class="route-eyebrow">CONNECTION</div><h3>连接设置</h3></div><p>默认通过扩展 Service Worker 直连。</p></div>
+        <section class="settings-section settings-panel" data-settings-panel="advanced" ${panelHidden("advanced")}>
+          <div class="settings-section-heading"><div><h3>高级设置</h3></div><p>请求路由与代理配置。</p></div>
           <label>请求模式<select id="api-mode"><option value="direct">扩展直连（本地开发）</option><option value="proxy">受控代理（生产推荐）</option></select></label>
           <label>代理地址<input id="proxy-url" type="url" value="${esc(settings.proxyBaseUrl || "")}" placeholder="https://your-proxy.example.com" /></label>
           <p class="field-hint">请勿将代理地址指向不可信服务。</p>
@@ -925,6 +949,17 @@ function renderSettingsPage(root) {
         <button class="primary-button settings-save" type="submit">保存设置</button>
       </form>
     </section>`;
+  $$("[data-settings-tab]").forEach((button) => button.addEventListener("click", () => {
+    state.settingsTab = button.dataset.settingsTab;
+    $$("[data-settings-tab]").forEach((item) => {
+      const active = item === button;
+      item.classList.toggle("is-active", active);
+      item.setAttribute("aria-selected", String(active));
+    });
+    $$("[data-settings-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.settingsPanel !== state.settingsTab;
+    });
+  }));
   $("#api-mode").value = settings.apiMode || "direct";
   $("#asr-provider").value = settings.asrProvider || "qwen";
   $("#local-qwen-model").value = settings.localQwenModel || "Qwen/Qwen3-ASR-0.6B";
@@ -934,8 +969,11 @@ function renderSettingsPage(root) {
     if (!localNode || !nativeStatus) return;
     const model = $("#local-qwen-model").value;
     const cached = Boolean(nativeStatus.localQwen?.cachedModels?.[model]);
+    const supported = nativeStatus.localQwen?.supported !== false;
     localNode.classList.toggle("is-ready", nativeStatus.localQwen?.available);
-    localNode.textContent = nativeStatus.localQwen?.available
+    localNode.textContent = !supported
+      ? nativeStatus.localQwen?.reason || "当前系统不支持本地 Qwen3-ASR"
+      : nativeStatus.localQwen?.available
       ? `本地运行时已安装 · 当前模型${cached ? "已缓存" : "将在首次使用时下载"}`
       : "本地运行时未安装，请执行 ./install_local_asr.sh";
   };
@@ -993,8 +1031,21 @@ function renderSettingsPage(root) {
       notify(command);
     }
   });
+  $("#copy-local-asr-command").addEventListener("click", async () => {
+    const command = $("#local-qwen-install-command").textContent;
+    if (!command || command === "当前系统不支持") {
+      notify("Windows 暂不支持本地 Qwen3-ASR，请使用 API 模式");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(command);
+      notify("本地 Qwen 安装命令已复制");
+    } catch {
+      notify(command);
+    }
+  });
   $$("[data-clear-summary-key]").forEach((button) => button.addEventListener("click", async () => {
-    if (!confirm("确认从 macOS Keychain 删除这个 AI 总结 API Key？")) return;
+    if (!confirm("确认从系统安全凭据存储中删除这个 AI 总结 API Key？")) return;
     try {
       const status = await send("save-summary-credentials", {
         clearKeys: [button.dataset.clearSummaryKey]
@@ -1029,11 +1080,33 @@ function renderSettingsPage(root) {
     node.textContent = status.available
       ? `本地文件助手已连接 · ${status.version || "可用"}`
       : `本地文件助手未连接，目录选择、ASR 和 AI 总结不可用。${status.error || ""}`;
+    const isWindows = status.platform === "windows";
+    $("#native-platform").textContent = isWindows ? "Windows" : "macOS";
+    $("#native-install-title").textContent = isWindows
+      ? "Windows 安装步骤"
+      : "macOS 安装步骤";
+    $("#native-install-description").textContent = isWindows
+      ? "安装 Python 3 后，在项目目录用 PowerShell 执行下方命令；完成后重新加载扩展。"
+      : "在项目目录用终端执行下方命令；完成后重新加载扩展。";
     $("#native-extension-id").textContent = status.extensionId || "未知";
     $("#native-manifest-path").textContent = status.manifestPath || "未知";
     $("#native-host-path").textContent = status.hostPath || "未知";
     $("#native-install-command").textContent = status.installCommand || "未知";
     $("#native-host-help").href = status.helpUrl;
+    $("#credential-storage-label").textContent = status.credentialStorage
+      || (isWindows ? "Windows DPAPI" : "macOS Keychain");
+    const localOption = $("#asr-provider option[value=local_qwen]");
+    const localSupported = status.localQwen?.supported !== false && !isWindows;
+    localOption.disabled = !localSupported;
+    $("#local-qwen-install-command").textContent = localSupported
+      ? status.localAsrInstallCommand || "./install_local_asr.sh"
+      : "当前系统不支持";
+    $("#copy-local-asr-command").disabled = !localSupported;
+    if (!localSupported && $("#asr-provider").value === "local_qwen") {
+      $("#asr-provider").value = "qwen";
+      updateAsrProviderSettings();
+      notify("Windows 暂不支持本地 Qwen3-ASR，已切换到 Qwen API");
+    }
     $$("[data-choose-directory]").forEach((button) => {
       button.disabled = !status.available;
       button.title = status.available ? "" : "请先安装并连接 Native Host";
@@ -1539,6 +1612,29 @@ function openLogin() {
   $("#login-dialog").showModal();
 }
 
+function openLogoutConfirmation() {
+  $("#logout-dialog").showModal();
+}
+
+async function confirmLogout() {
+  const button = $("#logout-confirm");
+  button.disabled = true;
+  button.textContent = "正在退出…";
+  try {
+    await send("logout");
+    state.auth = null;
+    $("#logout-dialog").close();
+    markConnection();
+    renderRoute();
+    notify("已退出登录");
+  } catch (error) {
+    notify(`退出失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "确认退出登录";
+  }
+}
+
 async function submitLogin(event) {
   event.preventDefault();
   const errorNode = $("#login-error");
@@ -1754,7 +1850,11 @@ async function init() {
     else closePodcast();
   });
   $("#sidebar-toggle").addEventListener("click", () => setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed")));
-  $("#account-button").addEventListener("click", () => state.auth ? send("logout").then(() => { state.auth = null; markConnection(); renderRoute(); notify("已退出登录"); }) : openLogin());
+  $("#account-button").addEventListener("click", () => {
+    if (state.auth) openLogoutConfirmation();
+    else openLogin();
+  });
+  $("#logout-confirm").addEventListener("click", confirmLogout);
   $("#login-form").addEventListener("submit", submitLogin); $("#send-code-button").addEventListener("click", sendCode);
   $$("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
   document.addEventListener("click", (event) => {

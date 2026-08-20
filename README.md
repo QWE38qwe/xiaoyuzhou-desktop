@@ -1,6 +1,6 @@
 # 小宇宙桌面版（非官方）
 
-一个面向 macOS 的非官方小宇宙 Chrome 扩展，提供独立桌面窗口、节目发现与搜索、订阅管理、音频下载、本地或云端 ASR 转写和多模型 AI 总结。
+一个面向 macOS 与 Windows 的非官方小宇宙 Chrome 扩展，提供独立桌面窗口、节目发现与搜索、订阅管理、音频下载、本地或云端 ASR 转写和多模型 AI 总结。
 
 > 本项目与小宇宙官方无隶属、授权或合作关系。请遵守小宇宙及所选云服务的使用条款，并仅处理你有权访问的内容。
 
@@ -32,7 +32,7 @@ Demo 使用虚构数据，可体验发现、节目详情、播放器、ASR 转�
 
 ![下载与 ASR 设置](docs/images/settings-asr.png)
 
-音频、ASR 转写稿与 AI 总结稿可分别指定 macOS 绝对保存目录。ASR 支持本地 Qwen3-ASR、Qwen API 与豆包 API；AI 总结支持 Qwen、豆包、DeepSeek、Kimi 和 GLM，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain。
+音频、ASR 转写稿与 AI 总结稿可分别指定系统绝对保存目录。ASR 支持本地 Qwen3-ASR（Apple Silicon）、Qwen API 与豆包 API；AI 总结支持 Qwen、豆包、DeepSeek、Kimi 和 GLM，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain 或 Windows DPAPI。
 
 ## 功能
 
@@ -43,15 +43,15 @@ Demo 使用虚构数据，可体验发现、节目详情、播放器、ASR 转�
 - 使用本地 Qwen3-ASR、Qwen API 或豆包 API 转写音频
 - 将转写结果保存为本地 Markdown 文档
 - 使用 Qwen、豆包、DeepSeek、Kimi 或 GLM 总结转写稿
-- 管理 AI 总结 Prompt 版本，内置结构化播客总结 Prompt
+- 管理 AI 总结 Prompt 版本，内置结构化总结与按时间戳话题总结
 - 自动分段总结长转写稿并输出独立 Markdown 文档
 - 折叠侧栏和独立播放器控制
 
 ## 环境要求
 
-- macOS
+- macOS 或 Windows 10/11
 - Google Chrome 110 或更高版本
-- 系统自带的 `/usr/bin/python3`
+- Python 3（macOS 可使用系统 `/usr/bin/python3`；Windows 需加入 PATH）
 - 可选：`ffmpeg`。本地 Qwen、豆包或 Fun-ASR 处理 M4A 等格式时需要
 - 可选：`uv`。安装本地 Qwen3-ASR 运行时需要
 - 如使用 ASR API 或 AI 总结：对应服务的 API Key
@@ -89,7 +89,9 @@ Chrome Web Store 审核通过前，请使用开发者模式：
 
 ### 3. 安装 Native Host
 
-Native Host 用于目录选择、绝对路径下载、Keychain 凭据读写，以及转写稿和总结文档落盘。
+Native Host 用于目录选择、绝对路径下载、系统安全凭据读写，以及转写稿和总结文档落盘。
+
+#### macOS
 
 Chrome Web Store 安装版使用默认商店扩展 ID：
 
@@ -116,6 +118,24 @@ chmod +x install_native_host.sh
 ```
 
 显示“本地助手未连接”时，复制设置页给出的安装命令，在仓库目录执行后重新加载扩展。
+
+#### Windows
+
+以 PowerShell 打开仓库目录，开发者模式传入扩展卡片显示的 ID：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_native_host.ps1 -ExtensionId <你的开发版扩展ID>
+```
+
+商店安装版可省略 `-ExtensionId`。脚本会：
+
+- 将 Host 安装到 `%LOCALAPPDATA%\Xiaoyuzhou Desktop Native Host`
+- 生成 Native Messaging 可执行桥接器
+- 写入 Chrome 和 Edge 当前用户注册表
+- 使用 Windows DPAPI 加密 API Key
+
+Windows 支持目录选择、绝对路径保存、Qwen/豆包 ASR API 与 AI 总结 API。Windows
+暂不支持基于 MLX 的本地 Qwen3-ASR，请在“语音转写”中选择 API 模式。
 
 ### 4. 可选：安装本地 Qwen3-ASR
 
@@ -197,7 +217,12 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 
 “AI 总结”设置可选择是否补充评论，默认关闭。开启后读取当前单集公开评论，过滤“终于更新、沙发、我来啦、多多更新、等了好久”等低信息内容，最多发送 80 条、总计 20000 字符，不发送评论者昵称。内置 Prompt 会把评论严格标注为听众观点，不作为节目事实。
 
-总结结果按单集记录在 Chrome 本地存储中。已有结果的按钮显示“已 AI 总结”，再次执行前会确认，且新文件不会覆盖旧文件。内置 Prompt 输出一句话摘要、核心结论、内容脉络、关键观点与依据、行动项、人物与术语、不确定信息和可选听众反馈。内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
+总结结果按单集记录在 Chrome 本地存储中。已有结果的按钮显示“已 AI 总结”，再次执行前会确认，且新文件不会覆盖旧文件。内置 Prompt 包含：
+
+- `播客结构化总结`：输出一句话摘要、核心结论、内容脉络、行动项等完整结构。
+- `按时间戳话题总结`：保留原始时间戳链接，逐个话题总结所有有价值内容，不跨话题混合。
+
+内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
 
 ```text
 原转写稿名称 - AI总结.md
@@ -210,7 +235,7 @@ AI 总结稿目录留空时沿用 ASR 转写稿目录，已有用户升级后不
 完整隐私政策：[PRIVACY.md](PRIVACY.md)
 
 - 小宇宙登录凭证保存在 Chrome 扩展本地存储中
-- ASR 和 AI 总结 API Key 由 Native Host 保存到 macOS Keychain，扩展存储和项目文件中不保存明文 Key
+- ASR 和 AI 总结 API Key 由 Native Host 保存到 macOS Keychain 或 Windows DPAPI，扩展存储和项目文件中不保存明文 Key
 - 从旧版本升级时，Native Host 仅在 Keychain 写入并校验成功后删除旧的 `asr_credentials.json`；迁移失败会保留原文件
 - 选择本地 Qwen3-ASR 时，音频和转写均留在本机，不会自动回退到云端 API
 - 只有主动点击“ASR 转写”或“AI 总结”后，音频 URL 或音频内容才可能发送给所选 ASR 服务
@@ -245,6 +270,8 @@ sh -n install_native_host.sh
 sh -n install_local_asr.sh
 ```
 
+Windows 安装脚本可在 Windows PowerShell 中执行验证。
+
 ## 卸载 Native Host
 
 先从 Chrome 删除扩展，然后执行：
@@ -259,10 +286,18 @@ for account in summary.qwen summary.doubao summary.deepseek summary.kimi summary
 done
 ```
 
+Windows 卸载：
+
+```powershell
+Remove-Item "$env:LOCALAPPDATA\Xiaoyuzhou Desktop Native Host" -Recurse -Force
+Remove-Item "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.xiaoyuzhou.desktop" -Recurse -Force
+Remove-Item "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.xiaoyuzhou.desktop" -Recurse -Force
+```
+
 ## 已知限制
 
-- Native Host 当前仅支持 macOS
 - 本地 Qwen3-ASR 当前仅支持 Apple Silicon；Intel Mac 请使用 API 模式
+- Windows 暂不支持本地 Qwen3-ASR；目录和云端 API 功能可用
 - 本项目依赖非公开稳定性承诺的小宇宙接口，接口变化可能导致部分功能失效
 - 当前未发布到 Chrome Web Store，需要通过开发者模式安装
 
