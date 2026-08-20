@@ -20,7 +20,8 @@ const state = {
   settings: null,
   searchRequest: 0,
   searchKeyword: "",
-  searchResults: null,
+  searchResultsByType: { episode: null, podcast: null, user: null },
+  searchErrorsByType: {},
   podcastView: null,
   episodeView: null,
   subscribedPids: new Set(),
@@ -38,6 +39,13 @@ const routeMeta = {
   search: ["FIND YOUR NEXT STORY", "搜索"],
   subscriptions: ["YOUR LIBRARY", "我的订阅"],
   settings: ["PREFERENCES", "设置"]
+};
+
+const SEARCH_TYPES = ["episode", "podcast", "user"];
+const SEARCH_TYPE_LABELS = {
+  episode: "单集",
+  podcast: "节目",
+  user: "用户"
 };
 
 function send(type, payload = {}) {
@@ -396,9 +404,8 @@ function renderSearchPage(root) {
   $$("[data-search-type]").forEach((button) => button.classList.toggle("is-active", button.dataset.searchType === state.searchType));
   $$("[data-search-type]").forEach((button) => button.addEventListener("click", () => {
     state.searchType = button.dataset.searchType;
-    state.searchResults = null;
     $$("[data-search-type]").forEach((item) => item.classList.toggle("is-active", item === button));
-    $("#search-results").innerHTML = `<div class="empty">输入关键词，搜索${button.textContent}。</div>`;
+    renderSearchResults($("#search-results"));
   }));
   $("#search-submit").addEventListener("click", performSearch);
   $("#search-input").addEventListener("keydown", (event) => { if (event.key === "Enter") performSearch(); });
@@ -410,27 +417,79 @@ async function performSearch() {
   const holder = $("#search-results");
   if (!keyword) return notify("先输入一个关键词");
   state.searchKeyword = keyword;
+  state.searchResultsByType = { episode: null, podcast: null, user: null };
+  state.searchErrorsByType = {};
   const requestId = ++state.searchRequest;
-  holder.innerHTML = `<div class="loading">正在搜索「${esc(keyword)}」……</div>`;
-  try {
-    const response = await api("/search", { keyword, type: state.searchType.toUpperCase() });
-    if (requestId !== state.searchRequest) return;
-    state.searchResults = listOf(response).map(itemOf).filter((item) => ["EPISODE", "PODCAST", "USER"].includes(item?.type));
-    renderSearchResults(holder);
-  } catch (error) {
-    holder.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
-  }
+  renderSearchResults(holder, { loading: true });
+  const responses = await Promise.allSettled(
+    SEARCH_TYPES.map(async (type) => {
+      const response = await api("/search", {
+        keyword,
+        type: type.toUpperCase()
+      });
+      return {
+        type,
+        items: listOf(response)
+          .map(itemOf)
+          .filter((item) => item?.type === type.toUpperCase())
+      };
+    })
+  );
+  if (requestId !== state.searchRequest) return;
+  responses.forEach((result, index) => {
+    const type = SEARCH_TYPES[index];
+    if (result.status === "fulfilled") {
+      state.searchResultsByType[result.value.type] = result.value.items;
+      delete state.searchErrorsByType[result.value.type];
+    } else {
+      state.searchResultsByType[type] = [];
+      state.searchErrorsByType[type] = result.reason?.message || "搜索失败";
+    }
+  });
+  renderSearchResults(holder);
 }
 
-function renderSearchResults(holder) {
-  if (state.searchResults === null) {
+function renderSearchResults(holder, { loading = false } = {}) {
+  const activeType = state.searchType;
+  const label = SEARCH_TYPE_LABELS[activeType] || "内容";
+  const results = state.searchResultsByType[activeType];
+  const inputValue = $("#search-input")?.value.trim() || state.searchKeyword;
+  if (!state.searchKeyword || inputValue !== state.searchKeyword) {
     holder.innerHTML = `<div class="empty">输入关键词，去找到下一段想听的声音。</div>`;
     return;
   }
-  holder.innerHTML = state.searchResults.length
-    ? state.searchResults.map((item, index) => searchResultRow(item, index)).join("")
-    : `<div class="empty">没有找到相关结果。</div>`;
-  bindSearchRows(holder, state.searchResults);
+  if (loading || results === null) {
+    holder.innerHTML = `<div class="loading">正在搜索「${esc(state.searchKeyword)}」相关${esc(label)}……</div>`;
+    return;
+  }
+  const error = state.searchErrorsByType[activeType];
+  if (error) {
+    holder.innerHTML = `<div class="empty">${esc(label)}搜索失败：${esc(error)}<br /><button class="mini-button" data-retry-search>重新搜索</button></div>`;
+    holder.querySelector("[data-retry-search]")?.addEventListener("click", performSearch);
+    return;
+  }
+  holder.innerHTML = results.length
+    ? results.map((item, index) => searchResultRow(item, index)).join("")
+    : `<div class="empty">没有找到和「${esc(state.searchKeyword)}」相关的${esc(label)}。</div>`;
+  bindSearchRows(holder, results);
+}
+
+function searchResultText(item, isPodcast) {
+  return item?.description
+    || item?.brief
+    || item?.introduction
+    || item?.podcast?.title
+    || item?.podcast?.name
+    || (isPodcast ? "播客节目" : "小宇宙单集");
+}
+
+function descriptionBlock(text) {
+  const value = String(text || "").trim();
+  const collapsible = value.length > 110;
+  return `<div class="result-description-wrap${collapsible ? " is-collapsed" : ""}">
+    <span class="result-description">${esc(value)}</span>
+    ${collapsible ? '<button class="description-toggle" data-row-action="toggle-description" type="button">展开</button>' : ""}
+  </div>`;
 }
 
 function searchResultRow(item, index) {
@@ -453,7 +512,7 @@ function searchResultRow(item, index) {
     ${moreActions(secondaryActions, "action-menu-row")}`;
   return `<article class="episode-row" data-index="${index}">
     <div class="episode-thumb">${imageOf(item) ? `<img src="${esc(imageOf(item))}" alt="" />` : ""}</div>
-    <div class="episode-meta"><strong>${esc(titleOf(item))}</strong><span>${esc(item?.podcast?.title || item?.podcast?.name || item?.description || (isPodcast ? "播客节目" : "小宇宙单集"))}</span></div>
+    <div class="episode-meta"><strong>${esc(titleOf(item))}</strong>${descriptionBlock(searchResultText(item, isPodcast))}</div>
     <div class="row-actions">${actions}</div>
   </article>`;
 }
@@ -470,6 +529,12 @@ function bindSearchRows(holder, items) {
     if (control.tagName === "SUMMARY") return;
     const action = control.dataset.rowAction;
     closeActionMenu(control);
+    if (action === "toggle-description") {
+      const wrapper = control.closest(".result-description-wrap");
+      wrapper?.classList.toggle("is-collapsed");
+      control.textContent = wrapper?.classList.contains("is-collapsed") ? "展开" : "收起";
+      return;
+    }
     if (action === "play") openEpisode(item);
     if (action === "view-podcast") openPodcast(item);
     if (action === "summarize") summarizeEpisode(item, control).catch((error) => notify(error.message));
@@ -1104,11 +1169,13 @@ function renderPlayerAnchors(item = null) {
   holder.innerHTML = duration > 0
     ? timeline.map((entry) => {
       const left = Math.max(0, Math.min(100, entry.seconds / duration * 100));
+      const tooltip = `${entry.label} ${entry.text || "继续收听"}`;
       return `<button
         type="button"
         style="--anchor-position:${left}%"
         data-progress-seconds="${entry.seconds}"
-        title="${esc(`${entry.label} ${entry.text || "继续收听"}`)}"
+        data-tooltip="${esc(tooltip)}"
+        title="${esc(tooltip)}"
         aria-label="${esc(`跳转到 ${entry.label} ${entry.text || ""}`)}"
       ></button>`;
     }).join("")

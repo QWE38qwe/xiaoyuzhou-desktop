@@ -115,6 +115,8 @@ button { border: 0; cursor: pointer; }
 .progress-anchors button { background: var(--paper); border: 1px solid var(--ink); border-radius: 50%; height: 8px; left: var(--anchor-position); padding: 0; pointer-events: auto; position: absolute; top: 0; transform: translate(-50%, -50%); transition: background .14s, transform .14s; width: 8px; }
 .progress-anchors button:hover, .progress-anchors button:focus-visible { background: var(--yellow); outline: 2px solid var(--paper); transform: translate(-50%, -50%) scale(1.5); }
 .progress-anchors button.is-active { background: var(--ink); }
+.progress-anchors button::after { background: #222226; border-radius: 4px; bottom: 15px; box-shadow: 0 10px 26px rgba(25,25,29,.24); color: #fff; content: attr(data-tooltip); font: 11px/1.45 Manrope, "PingFang SC", sans-serif; left: 50%; max-width: 230px; min-width: 136px; opacity: 0; overflow-wrap: anywhere; padding: 8px 10px; pointer-events: none; position: absolute; text-align: left; transform: translate(-50%, 5px) scale(.98); transition: opacity .14s, transform .14s; width: max-content; z-index: 20; }
+.progress-anchors button:hover::after, .progress-anchors button:focus-visible::after { opacity: 1; transform: translate(-50%, 0) scale(1); }
 
 .episode-content-page { max-width: 880px; }
 .episode-content-hero { align-items: start; display: grid; gap: 34px; grid-template-columns: 230px minmax(0, 1fr); margin: 5px 0 38px; }
@@ -148,6 +150,13 @@ button { border: 0; cursor: pointer; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; }
 .secondary-button:disabled { opacity: .5; }
+.episode-row { align-items: start; }
+.episode-meta { min-width: 0; }
+.result-description-wrap { display: grid; gap: 5px; margin-top: 5px; max-width: 46ch; }
+.result-description { color: var(--ink-soft); display: block; font-size: 10px; line-height: 1.65; overflow-wrap: anywhere; }
+.result-description-wrap.is-collapsed .result-description { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.description-toggle { background: transparent; color: var(--ink); font-size: 10px; justify-self: start; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+.description-toggle:hover { color: var(--ink-soft); }
 .mini-button.is-complete, .row-action.is-complete { background: #e6f1e9; color: #285d3e; }
 .mini-button.is-complete:hover, .row-action.is-complete:hover { background: #d5e9db; }
 .player-link-button.is-complete { background: #e6f1e9 !important; border-color: #b9d5c2 !important; color: #285d3e !important; }
