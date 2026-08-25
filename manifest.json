@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "小宇宙桌面版",
   "short_name": "小宇宙",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "非官方小宇宙桌面扩展：发现、订阅、音频下载、本地或云端 ASR 与多模型 AI 总结。",
   "minimum_chrome_version": "110",
   "permissions": [
