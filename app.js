@@ -208,14 +208,38 @@ function formatEpisodePublishDate(value) {
 
 function episodeCardFacts(item) {
   const source = item?.episode?.eid ? item.episode : item;
+  const duration = durationOf(source);
   const facts = [
-    ["发布", formatEpisodePublishDate(source?.pubDate || source?.publishedAt || source?.createdAt)],
-    ["收听", formatEpisodeMetricCount(source?.playCount)],
-    ["评论", formatEpisodeMetricCount(source?.commentCount)]
-  ].filter(([, value]) => value);
+    {
+      className: "is-duration",
+      label: "时长",
+      value: duration ? formatTime(duration) : "",
+      icon: ""
+    },
+    {
+      className: "is-published",
+      label: "发布日期",
+      value: formatEpisodePublishDate(source?.pubDate || source?.publishedAt || source?.createdAt),
+      icon: ""
+    },
+    {
+      className: "is-listens",
+      label: "收听数",
+      value: formatEpisodeMetricCount(source?.playCount),
+      icon: "metric-icon-listens"
+    },
+    {
+      className: "is-comments",
+      label: "评论数",
+      value: formatEpisodeMetricCount(source?.commentCount),
+      icon: "metric-icon-comments"
+    }
+  ].filter((fact) => fact.value);
   if (!facts.length) return "";
   return `<div class="episode-card-facts" aria-label="单集数据">${
-    facts.map(([label, value]) => `<span>${esc(label)} ${esc(value)}</span>`).join("")
+    facts.map((fact) => `<span class="episode-card-metric ${fact.className}" aria-label="${esc(`${fact.label} ${fact.value}`)}" title="${esc(`${fact.label} ${fact.value}`)}">${
+      fact.icon ? `<i class="metric-icon ${fact.icon}" aria-hidden="true"></i>` : ""
+    }<span>${esc(fact.value)}</span></span>`).join("")
   }</div>`;
 }
 
@@ -413,8 +437,10 @@ function podcastCard(item, index) {
   ].join("");
   return `<article class="podcast-card" data-index="${index}">
     <div class="cover">${image ? `<img src="${esc(image)}" alt="" loading="lazy" />` : ""}</div>
-    <div class="card-copy"><strong title="${esc(titleOf(item))}">${esc(titleOf(item))}</strong><span class="card-subtitle">${esc(item?.podcast?.author?.nickname || item?.author?.nickname || item?.description || "小宇宙精选节目")}</span>${episodeCardFacts(item)}</div>
-    <div class="card-actions"><button class="mini-button" data-card-action="play">播放</button>${viewPodcast}${summary}${moreActions(secondaryActions, "action-menu-card")}</div>
+    <div class="card-main">
+      <div class="card-copy"><strong title="${esc(titleOf(item))}">${esc(titleOf(item))}</strong>${episodeCardFacts(item)}</div>
+      <div class="card-actions"><button class="mini-button" data-card-action="play">播放</button>${viewPodcast}${summary}${moreActions(secondaryActions, "action-menu-card")}</div>
+    </div>
   </article>`;
 }
 
