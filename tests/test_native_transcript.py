@@ -15,6 +15,20 @@ class NativeTranscriptTests(unittest.TestCase):
         self.assertEqual([item["start"] for item in segments], [0.5, 2.5])
         self.assertEqual([item["text"] for item in segments], ["第一句", "第二句"])
 
+    def test_official_transcript_preserves_timed_segments(self):
+        result = native_host.official_transcript_result(
+            [
+                {"startMs": 62000, "text": "第一段。"},
+                {"startMs": 1000, "text": "开场。"},
+                {"startMs": "invalid", "text": "忽略"},
+            ]
+        )
+        self.assertEqual(result["text"], "开场。第一段。")
+        self.assertEqual(
+            [(item["start"], item["text"]) for item in result["segments"]],
+            [(1.0, "开场。"), (62.0, "第一段。")],
+        )
+
     def test_markdown_uses_program_chapters_not_asr_segments(self):
         markdown = native_host.markdown_transcript(
             "测试单集",

@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 IS_WINDOWS = sys.platform == "win32"
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|]')
 RUNTIME_DIR = Path(__file__).resolve().parent
@@ -32,6 +32,8 @@ LOCAL_QWEN_MODELS = {
     "Qwen/Qwen3-ASR-1.7B",
 }
 FUN_ASR_MAX_DURATION_SECONDS = 5 * 60
+OFFICIAL_TRANSCRIPT_MAX_BYTES = 20 * 1024 * 1024
+OFFICIAL_TRANSCRIPT_MAX_SEGMENTS = 100_000
 KEYCHAIN_SERVICE = "com.xiaoyuzhou.desktop"
 KEYCHAIN_ACCOUNTS = {
     "qwenApiKey": "asr.qwen",
@@ -157,6 +159,27 @@ def transcription_result(text, segments=None):
     if not body:
         raise RuntimeError("ASR 未返回转写文本")
     return {"text": body, "segments": normalized}
+
+
+def official_transcript_result(items):
+    if not isinstance(items, list):
+        raise RuntimeError("小宇宙官方文字稿格式异常")
+    if len(items) > OFFICIAL_TRANSCRIPT_MAX_SEGMENTS:
+        raise RuntimeError("小宇宙官方文字稿片段过多")
+
+    normalized_items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized_items.append(
+            {
+                "text": item.get("text"),
+                "start": item.get("startMs"),
+                "end": item.get("endMs", item.get("startMs")),
+            }
+        )
+    segments = normalize_segments(normalized_items, time_unit="milliseconds")
+    return transcription_result(join_segment_text(segments), segments)
 
 
 def format_timestamp(seconds):
@@ -1693,6 +1716,59 @@ def transcribe_remote(message):
     }
 
 
+def export_official_transcript(message):
+    parsed = urlparse(str(message.get("transcriptUrl") or ""))
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("小宇宙官方文字稿地址无效")
+
+    request = urllib.request.Request(
+        parsed.geturl(),
+        headers={"User-Agent": "Xiaoyuzhou/2.99.1(android 28)"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            final_url = urlparse(response.geturl())
+            if final_url.scheme != "https":
+                raise ValueError("小宇宙官方文字稿发生了不安全重定向")
+            payload = response.read(OFFICIAL_TRANSCRIPT_MAX_BYTES + 1)
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"下载小宇宙官方文字稿失败（{error.code}）") from error
+
+    if len(payload) > OFFICIAL_TRANSCRIPT_MAX_BYTES:
+        raise RuntimeError("小宇宙官方文字稿文件过大")
+    try:
+        result = official_transcript_result(json.loads(payload.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("小宇宙官方文字稿不是有效的 JSON") from error
+
+    transcript_directory = ensure_directory(message.get("transcriptDirectory"))
+    base_name = safe_filename(message.get("baseName") or "transcript")
+    chapter_groups, _ = chaptered_transcript(result, message.get("timeline"))
+    chapter_count = sum(
+        1 for item in chapter_groups if item.get("seconds") is not None
+    )
+    destination = unique_path(
+        transcript_directory,
+        f"{base_name} - 小宇宙文字稿.md",
+    )
+    destination.write_text(
+        markdown_transcript(
+            base_name,
+            result,
+            episode_id=message.get("episodeId"),
+            episode_url=message.get("episodeUrl"),
+            timeline=message.get("timeline"),
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "source": "official",
+        "markdown": str(destination),
+        "chapterCount": chapter_count,
+        "segmentCount": len(result["segments"]),
+    }
+
+
 def handle_message(message):
     action = message.get("action")
     if action == "ping":
@@ -1728,6 +1804,8 @@ def handle_message(message):
         return download_audio(message)
     if action == "transcribe_remote":
         return transcribe_remote(message)
+    if action == "export_official_transcript":
+        return export_official_transcript(message)
     if action == "summarize_transcript":
         return summarize_remote(message)
     raise ValueError("未知的本地助手操作")

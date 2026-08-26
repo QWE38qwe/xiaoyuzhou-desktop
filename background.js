@@ -7,6 +7,7 @@ const SETTINGS_KEY = "xyzSettings";
 const SUMMARY_HISTORY_KEY = "xyzSummaryHistory";
 const NATIVE_HOST = "com.xiaoyuzhou.desktop";
 const ASR_SETTINGS_VERSION = 2;
+const TRANSCRIPT_SOURCE_SETTINGS_VERSION = 1;
 const SUMMARY_SETTINGS_VERSION = 4;
 const DEFAULT_SUMMARY_PROMPT = {
   id: "builtin-podcast-structured-0806-v1",
@@ -137,6 +138,8 @@ const DEFAULT_SETTINGS = {
   transcriptDownloadPath: "",
   summaryDownloadPath: "",
   downloadSaveAs: false,
+  transcriptSource: "official",
+  transcriptSourceSettingsVersion: TRANSCRIPT_SOURCE_SETTINGS_VERSION,
   asrProvider: "qwen",
   asrSettingsVersion: ASR_SETTINGS_VERSION,
   localQwenModel: "Qwen/Qwen3-ASR-0.6B",
@@ -250,6 +253,14 @@ async function getSettings() {
       asrSettingsVersion: ASR_SETTINGS_VERSION,
       qwenAsrEndpoint: DEFAULT_SETTINGS.qwenAsrEndpoint,
       qwenAsrModel: DEFAULT_SETTINGS.qwenAsrModel
+    };
+    changed = true;
+  }
+  if ((settings.transcriptSourceSettingsVersion || 0) < TRANSCRIPT_SOURCE_SETTINGS_VERSION) {
+    merged = {
+      ...merged,
+      transcriptSourceSettingsVersion: TRANSCRIPT_SOURCE_SETTINGS_VERSION,
+      transcriptSource: DEFAULT_SETTINGS.transcriptSource
     };
     changed = true;
   }
@@ -559,6 +570,58 @@ async function transcribeAudio({
   });
 }
 
+async function exportOfficialTranscript({
+  episodeId,
+  baseName,
+  episodeUrl = "",
+  timeline = []
+}) {
+  const eid = String(episodeId || "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(eid)) {
+    throw new Error("无法识别需要导出文字稿的单集");
+  }
+  const auth = await authWithDeviceId(await getAuth());
+  if (!auth?.accessToken) throw new Error("请先登录小宇宙");
+
+  const detailResponse = await requestJson({
+    path: "/episode_detail",
+    method: "GET",
+    body: { eid },
+    auth
+  });
+  const episode = detailResponse.data?.data || detailResponse.data?.episode || detailResponse.data || {};
+  const mediaId = String(
+    episode?.media?.id || episode?.mediaId || ""
+  ).trim();
+  if (!mediaId) {
+    throw new Error("本集未提供官方文字稿所需的媒体信息");
+  }
+
+  const transcriptResponse = await requestJson({
+    path: "/v1/episode-transcript/get",
+    body: { eid, mediaId },
+    auth
+  });
+  const transcriptData = transcriptResponse.data?.data?.data
+    || transcriptResponse.data?.data
+    || {};
+  const transcriptUrl = String(transcriptData.transcriptUrl || "").trim();
+  if (!transcriptUrl) {
+    throw new Error("本集暂未提供小宇宙官方文字稿。请在设置中切换为“ASR 生成”后重试");
+  }
+
+  const settings = await getSettings();
+  return nativeHostRequest({
+    action: "export_official_transcript",
+    transcriptUrl,
+    baseName: safeDownloadFilename(baseName || `小宇宙-${eid}`).replace(/\.[^.]+$/, ""),
+    transcriptDirectory: transcriptDirectoryFromSettings(settings),
+    episodeId: eid,
+    episodeUrl: String(episodeUrl || ""),
+    timeline: Array.isArray(timeline) ? timeline.slice(0, 100) : []
+  });
+}
+
 async function importSummaryTranscript() {
   const settings = await getSettings();
   return nativeHostRequest({
@@ -663,6 +726,10 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
     data = { message: text };
   }
 
+  // #region debug-point A:episode-detail-shape
+  if (globalThis.__XYZ_DEBUG_PLATFORM_TRANSCRIPT__ && path === "/episode_detail") fetch("http://127.0.0.1:7777/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "platform-transcript-source", runId: "pre-fix", hypothesisId: "A", location: "background.js:requestJson", msg: "[DEBUG] Episode detail response observed", data: { status: response.status, topLevelKeys: Object.keys(data || {}).slice(0, 20), episodeKeys: Object.keys(data?.data || {}).filter((key) => /^(eid|media|transcript|shownotes|duration)$/i.test(key)).sort() }, ts: Date.now() }) }).catch(() => {});
+  // #endregion
+
   if (response.status === 401 && retry && auth?.refreshToken) {
     const refreshed = await refreshToken(auth);
     return requestJson({ path, method, body, auth: refreshed, retry: false });
@@ -758,6 +825,7 @@ async function updateSettings(next) {
   }
   let settings = { ...DEFAULT_SETTINGS, ...(await getSettings()), ...next };
   settings.asrSettingsVersion = ASR_SETTINGS_VERSION;
+  settings.transcriptSourceSettingsVersion = TRANSCRIPT_SOURCE_SETTINGS_VERSION;
   settings = normalizeSummarySettings(settings);
   settings.downloadFolder = normalizeDownloadFolder(settings.downloadFolder);
   settings.transcriptFolder = normalizeDownloadFolder(settings.transcriptFolder);
@@ -765,6 +833,9 @@ async function updateSettings(next) {
   settings.transcriptDownloadPath = normalizeAbsolutePath(settings.transcriptDownloadPath, "转写稿保存路径");
   settings.summaryDownloadPath = normalizeAbsolutePath(settings.summaryDownloadPath, "AI 总结稿保存路径");
   settings.downloadSaveAs = Boolean(settings.downloadSaveAs);
+  settings.transcriptSource = ["official", "asr"].includes(settings.transcriptSource)
+    ? settings.transcriptSource
+    : "official";
   settings.asrProvider = ["local_qwen", "qwen", "doubao"].includes(settings.asrProvider)
     ? settings.asrProvider
     : "qwen";
@@ -823,6 +894,8 @@ async function handleMessage(message) {
       return downloadAudio(message.payload);
     case "transcribe-audio":
       return transcribeAudio(message.payload);
+    case "export-official-transcript":
+      return exportOfficialTranscript(message.payload);
     case "get-native-host-status":
       return getNativeHostStatus();
     case "save-asr-credentials":

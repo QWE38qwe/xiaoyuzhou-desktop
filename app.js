@@ -81,6 +81,10 @@ function summaryActionButton(item, className, actionAttribute) {
   >${completed ? "已 AI 总结" : "AI 总结"}</button>`;
 }
 
+function transcriptActionLabel(source = state.settings?.transcriptSource) {
+  return source === "asr" ? "ASR 转写" : "导出文字稿";
+}
+
 function refreshSummaryIndicators(episodeId = "") {
   const eid = String(episodeId || "");
   $$("[data-summary-eid]").forEach((button) => {
@@ -431,7 +435,7 @@ function podcastCard(item, index) {
   const secondaryActions = [
     canViewPodcast ? `<button data-card-action="subscribe" role="menuitem" ${subscribed ? "disabled" : ""}>${subscribed ? "已订阅" : "订阅节目"}</button>` : "",
     canResolveEpisode ? `<button data-card-action="download" role="menuitem">下载音频</button>` : "",
-    canResolveEpisode ? `<button data-card-action="transcribe" role="menuitem">ASR 转写</button>` : "",
+    canResolveEpisode ? `<button data-card-action="transcribe" role="menuitem">${transcriptActionLabel()}</button>` : "",
     episodeIdOf(item) ? `<button data-card-action="copy-episode" role="menuitem">复制单集链接</button>` : "",
     canViewPodcast ? `<button data-card-action="copy-podcast" role="menuitem">复制节目链接</button>` : ""
   ].join("");
@@ -458,7 +462,7 @@ function bindCardActions(holder, items) {
       if (action === "summarize") summarizeEpisode(item, control).catch((error) => notify(error.message));
       if (action === "subscribe") toggleSubscription(item, control);
       if (action === "download") downloadEpisodeAudio(item);
-      if (action === "transcribe") transcribeEpisodeAudio(item, control);
+      if (action === "transcribe") exportEpisodeTranscript(item, control);
       if (action === "copy-episode") copyEpisodeLink(item);
       if (action === "copy-podcast") copyPodcastLink(item);
     });
@@ -569,7 +573,7 @@ function searchResultRow(item, index) {
   const secondaryActions = item?.type === "USER" ? "" : [
     isPodcast ? `<button data-row-action="subscribe" role="menuitem" ${subscribed ? "disabled" : ""}>${subscribed ? "已订阅" : "订阅节目"}</button>` : "",
     canResolveEpisode ? `<button data-row-action="download" role="menuitem">下载音频</button>` : "",
-    canResolveEpisode ? `<button data-row-action="transcribe" role="menuitem">ASR 转写</button>` : "",
+    canResolveEpisode ? `<button data-row-action="transcribe" role="menuitem">${transcriptActionLabel()}</button>` : "",
     episodeIdOf(item) ? `<button data-row-action="copy-episode" role="menuitem">复制单集链接</button>` : "",
     canViewPodcast ? `<button data-row-action="copy-podcast" role="menuitem">复制节目链接</button>` : ""
   ].join("");
@@ -608,7 +612,7 @@ function bindSearchRows(holder, items) {
     if (action === "summarize") summarizeEpisode(item, control).catch((error) => notify(error.message));
     if (action === "subscribe") toggleSubscription(item, control);
     if (action === "download") downloadEpisodeAudio(item);
-    if (action === "transcribe") transcribeEpisodeAudio(item, control);
+    if (action === "transcribe") exportEpisodeTranscript(item, control);
     if (action === "copy-episode") copyEpisodeLink(item);
     if (action === "copy-podcast") copyPodcastLink(item);
   }));
@@ -841,7 +845,7 @@ function podcastEpisodeRow(episode, index) {
   const publishedText = published ? new Date(published).toLocaleDateString("zh-CN") : "节目单集";
   const secondaryActions = [
     `<button data-episode-action="download" role="menuitem">下载音频</button>`,
-    `<button data-episode-action="transcribe" role="menuitem">ASR 转写</button>`,
+    `<button data-episode-action="transcribe" role="menuitem">${transcriptActionLabel()}</button>`,
     `<button data-episode-action="copy-episode" role="menuitem">复制单集链接</button>`,
     `<button data-episode-action="copy-podcast" role="menuitem">复制节目链接</button>`
   ].join("");
@@ -871,7 +875,7 @@ function bindPodcastEpisodeRows(holder, episodes) {
     if (action === "copy-episode") copyEpisodeLink(episode);
     if (action === "copy-podcast") copyPodcastLink(episode);
     if (action === "download") downloadEpisodeAudio(episode);
-    if (action === "transcribe") transcribeEpisodeAudio(episode, control);
+    if (action === "transcribe") exportEpisodeTranscript(episode, control);
   }));
 }
 
@@ -901,7 +905,7 @@ function renderSettingsPage(root) {
       <div class="section-heading"><h2>设置</h2><span>PREFERENCES</span></div>
       <nav class="settings-tabs" role="tablist" aria-label="设置分类">
         <button type="button" role="tab" aria-selected="${activeSettingsTab === "files"}" data-settings-tab="files" class="${activeSettingsTab === "files" ? "is-active" : ""}">文件与助手</button>
-        <button type="button" role="tab" aria-selected="${activeSettingsTab === "asr"}" data-settings-tab="asr" class="${activeSettingsTab === "asr" ? "is-active" : ""}">语音转写</button>
+        <button type="button" role="tab" aria-selected="${activeSettingsTab === "asr"}" data-settings-tab="asr" class="${activeSettingsTab === "asr" ? "is-active" : ""}">文字稿与 ASR</button>
         <button type="button" role="tab" aria-selected="${activeSettingsTab === "summary"}" data-settings-tab="summary" class="${activeSettingsTab === "summary" ? "is-active" : ""}">AI 总结</button>
         <button type="button" role="tab" aria-selected="${activeSettingsTab === "advanced"}" data-settings-tab="advanced" class="${activeSettingsTab === "advanced" ? "is-active" : ""}">高级</button>
       </nav>
@@ -912,12 +916,12 @@ function renderSettingsPage(root) {
             <div class="path-input-row"><input id="audio-download-path" type="text" value="${esc(audioPath)}" placeholder="留空使用浏览器默认下载目录/小宇宙音频" autocomplete="off" /><button type="button" class="secondary-button" data-choose-directory="audio-download-path">选择目录</button></div>
           </label>
           <p class="field-hint">实际位置：<code id="audio-path-preview"></code>。支持输入系统绝对路径或使用“选择目录”。</p>
-          <label>ASR 转写稿保存目录
+          <label>文字稿保存目录
             <div class="path-input-row"><input id="transcript-download-path" type="text" value="${esc(transcriptPath)}" placeholder="留空使用浏览器默认下载目录/小宇宙转写稿" autocomplete="off" /><button type="button" class="secondary-button" data-choose-directory="transcript-download-path">选择目录</button></div>
           </label>
           <p class="field-hint">实际位置：<code id="transcript-path-preview"></code>。</p>
           <label>AI 总结稿保存目录
-            <div class="path-input-row"><input id="summary-download-path" type="text" value="${esc(summaryPath)}" placeholder="留空使用 ASR 转写稿保存目录" autocomplete="off" /><button type="button" class="secondary-button" data-choose-directory="summary-download-path">选择目录</button></div>
+            <div class="path-input-row"><input id="summary-download-path" type="text" value="${esc(summaryPath)}" placeholder="留空使用文字稿保存目录" autocomplete="off" /><button type="button" class="secondary-button" data-choose-directory="summary-download-path">选择目录</button></div>
           </label>
           <p class="field-hint">实际位置：<code id="summary-path-preview"></code>。三个目录可分别配置。</p>
           <label class="checkbox-row"><input id="download-save-as" type="checkbox" ${settings.downloadSaveAs ? "checked" : ""} /><span>使用浏览器默认目录时，每次下载询问保存位置</span></label>
@@ -939,7 +943,10 @@ function renderSettingsPage(root) {
           </div>
         </section>
         <section class="settings-section settings-panel" data-settings-panel="asr" ${panelHidden("asr")}>
-          <div class="settings-section-heading"><div><h3>语音转写</h3></div><p>选择本地模型或云端 ASR。</p></div>
+          <div class="settings-section-heading"><div><h3>文字稿与 ASR</h3></div><p>优先导出小宇宙官方文字稿；ASR 可按需启用。</p></div>
+          <label>默认文字稿来源<select id="transcript-source"><option value="official">小宇宙官方文字稿（默认）</option><option value="asr">ASR 生成</option></select></label>
+          <p id="official-transcript-hint" class="field-hint">有官方文字稿时会直接导出，并按节目 Show Notes 时间戳生成可跳转章节；本集没有官方稿时不会自动调用 ASR。</p>
+          <div id="asr-settings-wrap">
           <label>ASR 服务<select id="asr-provider"><option value="local_qwen">本地 Qwen3-ASR</option><option value="qwen">Qwen API</option><option value="doubao">豆包 API</option></select></label>
           <div class="provider-settings" data-asr-provider-settings="local_qwen">
             <label>本地模型<select id="local-qwen-model"><option value="Qwen/Qwen3-ASR-0.6B">Qwen3-ASR 0.6B（推荐，约 1.2GB 内存）</option><option value="Qwen/Qwen3-ASR-1.7B">Qwen3-ASR 1.7B（高精度，约 3.4GB 内存）</option></select></label>
@@ -974,6 +981,7 @@ function renderSettingsPage(root) {
           <div id="asr-provider-status" class="native-host-status">正在检查 API 配置……</div>
           <p class="field-hint">转写稿优先保留模型返回的完整标点；模型未返回标点时，会依据语音片段停顿补充基础逗号和句号。</p>
           <p class="field-hint">API Key 由 Native Host 保存在 <span id="credential-storage-label">系统安全凭据存储</span>，扩展不会回显完整密钥。转写会将音频 URL 或音频内容发送至所选服务。</p>
+          </div>
         </section>
         <section class="settings-section settings-panel summary-settings-section" data-settings-panel="summary" ${panelHidden("summary")}>
           <div class="settings-section-heading"><div><h3>AI 总结</h3></div><p>配置模型、评论补充和 Prompt。</p></div>
@@ -1026,6 +1034,7 @@ function renderSettingsPage(root) {
     });
   }));
   $("#api-mode").value = settings.apiMode || "direct";
+  $("#transcript-source").value = settings.transcriptSource || "official";
   $("#asr-provider").value = settings.asrProvider || "qwen";
   $("#local-qwen-model").value = settings.localQwenModel || "Qwen/Qwen3-ASR-0.6B";
   let nativeStatus = null;
@@ -1048,8 +1057,15 @@ function renderSettingsPage(root) {
       node.hidden = node.dataset.asrProviderSettings !== $("#asr-provider").value;
     });
   };
+  const updateTranscriptSourceSettings = () => {
+    const usingAsr = $("#transcript-source").value === "asr";
+    $("#asr-settings-wrap").hidden = !usingAsr;
+    $("#official-transcript-hint").hidden = usingAsr;
+  };
   updateAsrProviderSettings();
+  updateTranscriptSourceSettings();
   $("#asr-provider").addEventListener("change", updateAsrProviderSettings);
+  $("#transcript-source").addEventListener("change", updateTranscriptSourceSettings);
   $("#summary-provider").value = settings.summaryProvider || "qwen";
   const updateSummaryProviderSettings = () => {
     $$("[data-summary-provider-settings]").forEach((node) => {
@@ -1076,7 +1092,7 @@ function renderSettingsPage(root) {
     try {
       const prompts = {
         "audio-download-path": "请选择音频保存目录",
-        "transcript-download-path": "请选择 ASR 转写稿保存目录",
+        "transcript-download-path": "请选择文字稿保存目录",
         "summary-download-path": "请选择 AI 总结稿保存目录"
       };
       const prompt = prompts[button.dataset.chooseDirectory] || "请选择保存目录";
@@ -1349,16 +1365,22 @@ function copyPodcastLink(item) {
 
 function updatePlayerLinkButtons(item = null) {
   const hasAudio = Boolean(audioOf(item));
+  const canExportOfficialTranscript = Boolean(episodeIdOf(item));
+  const canExportTranscript = state.settings?.transcriptSource === "asr"
+    ? hasAudio
+    : canExportOfficialTranscript;
   const summaryButton = $("#summarize-button");
   const summarized = Boolean(summaryRecordOf(item));
   $("#download-audio-button").disabled = !hasAudio;
-  $("#transcribe-audio-button").disabled = !hasAudio;
-  summaryButton.disabled = !hasAudio;
+  $("#transcribe-audio-button").disabled = !canExportTranscript;
+  $("#transcribe-audio-button").textContent = transcriptActionLabel();
+  $("#transcribe-audio-button").title = transcriptSourceLabel();
+  summaryButton.disabled = !canExportTranscript;
   summaryButton.textContent = summarized ? "已 AI 总结" : "AI 总结";
   summaryButton.classList.toggle("is-complete", summarized);
   summaryButton.title = summarized
     ? "已有总结，再次点击可重新生成"
-    : "自动转写并总结当前单集";
+    : "导出文字稿并总结当前单集";
   $("#view-podcast-button").disabled = !podcastIdOf(item);
   $("#copy-episode-link-button").disabled = !episodeLinkOf(item);
   $("#copy-podcast-link-button").disabled = !podcastLinkOf(item);
@@ -1379,7 +1401,7 @@ async function resolveEpisode(item) {
   }
   if (eid) {
     try {
-      const detail = unwrapDetail(await api("/episode_detail", { eid }));
+      const detail = unwrapDetail(await api("/episode_detail", { eid }, "GET"));
       episode = {
         ...episode,
         ...detail,
@@ -1407,6 +1429,70 @@ async function downloadEpisodeAudio(item) {
   }
 }
 
+function transcriptSourceLabel(source = state.settings?.transcriptSource) {
+  return source === "asr" ? asrProviderLabel() : "小宇宙官方文字稿";
+}
+
+function transcriptTimelineOf(episode) {
+  return XYZEpisodeContent.extractTimeline(episodeContentOf(episode))
+    .map((entry) => ({
+      seconds: entry.seconds,
+      label: entry.label,
+      title: entry.text || ""
+    }));
+}
+
+function rememberTranscriptExport(episode, result) {
+  const transcriptPath = result.markdown || result.md || result.txt;
+  if (!transcriptPath) throw new Error("文字稿导出完成但未返回文件路径");
+  state.currentTranscriptPath = transcriptPath;
+  state.currentTranscriptEpisodeId = episodeIdOf(episode);
+  state.currentTranscriptSegments = [];
+  state.currentSummaryPath = "";
+  return transcriptPath;
+}
+
+async function exportOfficialEpisodeTranscript(item, button = null, { propagate = false } = {}) {
+  const originalText = button?.textContent;
+  try {
+    const episode = await resolveEpisode(item);
+    const eid = episodeIdOf(episode);
+    if (!eid) throw new Error("无法识别需要导出文字稿的单集");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "导出中…";
+    }
+    setTranscriptionStatus("正在导出小宇宙官方文字稿，请保持窗口打开");
+    notify("正在导出小宇宙官方文字稿");
+    const filename = audioFilenameOf(episode);
+    const result = await send("export-official-transcript", {
+      payload: {
+        episodeId: eid,
+        baseName: filename.replace(/\.[^.]+$/, ""),
+        episodeUrl: episodeLinkOf(episode),
+        timeline: transcriptTimelineOf(episode)
+      }
+    });
+    const transcriptPath = rememberTranscriptExport(episode, result);
+    const timestampNote = result.chapterCount
+      ? ` · 已按节目时间轴整理为 ${result.chapterCount} 个章节`
+      : " · 节目未提供时间轴，已输出连续文稿";
+    setTranscriptionStatus(`官方文字稿导出完成${timestampNote}：${transcriptPath}`, "success");
+    notify(`官方文字稿已导出：${transcriptPath}`);
+    return transcriptPath;
+  } catch (error) {
+    setTranscriptionStatus(`文字稿导出失败：${error.message}`, "error");
+    if (!propagate) notify(error.message);
+    if (propagate) throw error;
+    return null;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
 async function transcribeEpisodeAudio(item, button = null, { propagate = false } = {}) {
   const originalText = button?.textContent;
   try {
@@ -1425,12 +1511,6 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
     setTranscriptionStatus(`${providerLabel} 长音频转写中，请保持窗口打开`);
     notify(`${providerLabel} ASR 正在转写，请保持窗口打开`);
     const filename = audioFilenameOf(episode);
-    const timeline = XYZEpisodeContent.extractTimeline(episodeContentOf(episode))
-      .map((entry) => ({
-        seconds: entry.seconds,
-        label: entry.label,
-        title: entry.text || ""
-      }));
     const result = await send("transcribe-audio", {
       payload: {
         url: audio,
@@ -1439,15 +1519,10 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
         language: "zh",
         episodeId: episodeIdOf(episode),
         episodeUrl: episodeLinkOf(episode),
-        timeline
+        timeline: transcriptTimelineOf(episode)
       }
     });
-    const transcriptPath = result.markdown || result.md || result.txt;
-    if (!transcriptPath) throw new Error("ASR 完成但未返回转写稿路径");
-    state.currentTranscriptPath = transcriptPath;
-    state.currentTranscriptEpisodeId = episodeIdOf(episode);
-    state.currentTranscriptSegments = [];
-    state.currentSummaryPath = "";
+    const transcriptPath = rememberTranscriptExport(episode, result);
     const timestampNote = result.chapterCount
       ? ` · 已按节目时间轴整理为 ${result.chapterCount} 个章节`
       : " · 节目未提供时间轴，已输出连续文稿";
@@ -1467,6 +1542,12 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
   }
 }
 
+async function exportEpisodeTranscript(item, button = null, options = {}) {
+  return state.settings?.transcriptSource === "asr"
+    ? transcribeEpisodeAudio(item, button, options)
+    : exportOfficialEpisodeTranscript(item, button, options);
+}
+
 function summaryProviderLabel(providerId = state.settings?.summaryProvider) {
   return SUMMARY_PROVIDERS.find((provider) => provider.id === providerId)?.label || providerId || "AI Provider";
 }
@@ -1483,7 +1564,7 @@ function ensureSummaryConsent() {
   if (state.settings?.summaryConsentAccepted) return Promise.resolve(true);
   const dialog = $("#summary-consent-dialog");
   $("#summary-consent-provider").textContent = summaryProviderLabel();
-  $("#summary-consent-asr").textContent = asrProviderLabel();
+  $("#summary-consent-asr").textContent = transcriptSourceLabel();
   $("#summary-consent-comments").textContent = state.settings?.summaryIncludeComments
     ? "筛选后的公开评论也会一并发送。"
     : "评论不会被读取或发送。";
@@ -1592,7 +1673,7 @@ async function summarizeTranscriptPath(
 async function summarizeEpisode(item, button = null) {
   const episode = await resolveEpisode(item);
   const eid = episodeIdOf(episode);
-  if (!eid || !audioOf(episode)) throw new Error("这集暂时没有可总结的音频");
+  if (!eid) throw new Error("无法识别需要总结的单集");
   if (!await ensureResummarize(episode)) return null;
   if (!await ensureSummaryConsent()) return null;
   const hasMatchingTranscript = (
@@ -1601,7 +1682,7 @@ async function summarizeEpisode(item, button = null) {
   );
   const transcriptPath = hasMatchingTranscript
     ? state.currentTranscriptPath
-    : await transcribeEpisodeAudio(episode, button, { propagate: true });
+    : await exportEpisodeTranscript(episode, button, { propagate: true });
   return summarizeTranscriptPath(
     transcriptPath,
     button,
@@ -1803,6 +1884,7 @@ async function saveSettings(event) {
         transcriptDownloadPath: $("#transcript-download-path").value.trim(),
         summaryDownloadPath: $("#summary-download-path").value.trim(),
         downloadSaveAs: $("#download-save-as").checked,
+        transcriptSource: $("#transcript-source").value,
         asrProvider: $("#asr-provider").value,
         localQwenModel: $("#local-qwen-model").value,
         qwenAsrEndpoint: $("#qwen-asr-endpoint").value.trim(),
@@ -1836,6 +1918,7 @@ async function saveSettings(event) {
     $("#summary-path-preview").textContent = state.settings.summaryDownloadPath
       || state.settings.transcriptDownloadPath
       || "浏览器默认下载目录/小宇宙转写稿";
+    updatePlayerLinkButtons(state.current);
     notify("设置已保存");
   } catch (error) {
     notify(error.message);
@@ -1861,7 +1944,7 @@ function initPlayer() {
   });
   $("#transcribe-audio-button").addEventListener("click", (event) => {
     closePlayerMenu();
-    return state.current ? transcribeEpisodeAudio(state.current, event.currentTarget) : notify("当前没有正在播放的单集");
+    return state.current ? exportEpisodeTranscript(state.current, event.currentTarget) : notify("当前没有正在播放的单集");
   });
   $("#summarize-button").addEventListener("click", (event) => {
     if (!state.current) return notify("当前没有正在播放的单集");
