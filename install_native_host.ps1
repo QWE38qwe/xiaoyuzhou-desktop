@@ -6,13 +6,13 @@ $ErrorActionPreference = "Stop"
 $HostName = "com.xiaoyuzhou.desktop"
 
 if ($ExtensionId -notmatch "^[a-p]{32}$") {
-  throw "无效的 Chrome 扩展 ID：$ExtensionId"
+  throw "Invalid Chrome extension ID: $ExtensionId"
 }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceHost = Join-Path $ScriptDir "native_host.py"
 if (-not (Test-Path $SourceHost)) {
-  throw "缺少 Native Host：$SourceHost"
+  throw "Native Host source is missing: $SourceHost"
 }
 
 $PythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
@@ -22,7 +22,7 @@ if (-not $PythonCommand) {
   $PythonPrefix = "-3 "
 }
 if (-not $PythonCommand) {
-  throw "未找到 Python 3。请先从 https://www.python.org/downloads/windows/ 安装，并勾选 Add Python to PATH。"
+  throw "Python 3 was not found. Install it from https://www.python.org/downloads/windows/ and enable Add Python to PATH."
 }
 
 $InstallDir = Join-Path $env:LOCALAPPDATA "Xiaoyuzhou Desktop Native Host"
@@ -49,6 +49,38 @@ public static class NativeHostLauncher
     private const string PythonPath = @"$PythonPath";
     private const string Arguments = @"$Arguments";
 
+    private static bool ReadExactly(Stream input, byte[] buffer, int count)
+    {
+        int offset = 0;
+        while (offset < count)
+        {
+            int read = input.Read(buffer, offset, count - offset);
+            if (read == 0) return false;
+            offset += read;
+        }
+        return true;
+    }
+
+    private static bool ForwardOneMessage(Stream input, Stream output)
+    {
+        byte[] header = new byte[4];
+        if (!ReadExactly(input, header, header.Length)) return false;
+
+        int length = header[0]
+            | (header[1] << 8)
+            | (header[2] << 16)
+            | (header[3] << 24);
+        if (length < 0 || length > 64 * 1024 * 1024) return false;
+
+        byte[] payload = new byte[length];
+        if (!ReadExactly(input, payload, payload.Length)) return false;
+
+        output.Write(header, 0, header.Length);
+        output.Write(payload, 0, payload.Length);
+        output.Flush();
+        return true;
+    }
+
     public static int Main()
     {
         var startInfo = new ProcessStartInfo(PythonPath, Arguments)
@@ -62,10 +94,14 @@ public static class NativeHostLauncher
         using (var process = Process.Start(startInfo))
         {
             if (process == null) return 1;
-            Task input = Console.OpenStandardInput().CopyToAsync(process.StandardInput.BaseStream);
-            Task output = process.StandardOutput.BaseStream.CopyToAsync(Console.OpenStandardOutput());
             Task error = process.StandardError.ReadToEndAsync();
-            output.Wait();
+            if (!ForwardOneMessage(Console.OpenStandardInput(), process.StandardInput.BaseStream))
+            {
+                process.Kill();
+                return 1;
+            }
+            process.StandardInput.Close();
+            process.StandardOutput.BaseStream.CopyTo(Console.OpenStandardOutput());
             process.WaitForExit();
             Console.OpenStandardOutput().Flush();
             return process.ExitCode;
@@ -117,6 +153,7 @@ $EdgeRegistry = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"
 New-Item -Path $EdgeRegistry -Force | Out-Null
 Set-Item -Path $EdgeRegistry -Value $ManifestPath
 
-Write-Host "本地助手已安装：$ManifestPath"
-Write-Host "已加入扩展 ID：$ExtensionId"
-Write-Host "请在 chrome://extensions 重新加载扩展。"
+Write-Host "Native Host installed: $ManifestPath"
+Write-Host "Extension ID added: $ExtensionId"
+Write-Host "Fully exit every Chrome process, then reopen Chrome."
+
