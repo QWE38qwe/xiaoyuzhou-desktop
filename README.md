@@ -1,8 +1,8 @@
 # 小宇宙桌面版（非官方）
 
-一个面向 macOS 与 Windows 的非官方小宇宙 Chrome 扩展，提供独立桌面窗口、节目发现与搜索、订阅管理、音频下载、官方文字稿导出、可选 ASR 转写和多模型 AI 总结。
+一个面向 macOS 与 Windows 的个人小宇宙 Chrome 扩展，提供独立桌面窗口、节目发现与搜索、订阅管理、音频下载、ASR 转写和多模型 AI 总结。
 
-> 本项目与小宇宙官方无隶属、授权或合作关系。请遵守小宇宙及所选云服务的使用条款，并仅处理你有权访问的内容。
+> 本项目不是小宇宙官方产品。账户接口仅在已获授权的范围内使用；请遵守小宇宙及所选云服务的使用条款，并仅处理你有权访问的内容。
 
 ## 在线演示
 
@@ -32,7 +32,7 @@ Demo 使用虚构数据，可体验发现、节目详情、播放器、文字稿
 
 ![下载与 ASR 设置](docs/images/settings-asr.png)
 
-音频、文字稿与 AI 总结稿可分别指定系统绝对保存目录。默认导出小宇宙官方文字稿，并按节目 Show Notes 生成可跳转章节；没有官方稿时，可在设置中切换为本地 Qwen3-ASR（Apple Silicon）、Qwen API 或豆包 API。AI 总结支持 Qwen、豆包、DeepSeek、Kimi 和 GLM，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain 或 Windows DPAPI。
+音频、文字稿与 AI 总结稿可分别指定系统绝对保存目录。文字稿使用本地 Qwen3-ASR（Apple Silicon）、Qwen API 或豆包 API 生成，并按节目 Show Notes 生成可跳转章节。AI 总结支持多个自定义模型、拖拽排序和独立 API Key，可使用 Qwen、豆包、DeepSeek、Kimi、GLM 或 OpenRouter，并提供本地 Prompt 版本管理。API Key 由 Native Host 保存到 macOS Keychain 或 Windows DPAPI。
 
 ## 功能
 
@@ -40,11 +40,10 @@ Demo 使用虚构数据，可体验发现、节目详情、播放器、文字稿
 - 查看节目详情及单集列表
 - 播放单集，复制节目或单集链接
 - 下载音频到浏览器默认目录或 macOS 绝对路径
-- 默认导出小宇宙官方文字稿，并保留节目时间戳深链
-- 按需使用本地 Qwen3-ASR、Qwen API 或豆包 API 转写音频
+- 使用本地 Qwen3-ASR、Qwen API 或豆包 API 转写音频，并保留节目时间戳深链
 - 将文字稿或 ASR 转写结果保存为本地 Markdown 文档
-- 使用 Qwen、豆包、DeepSeek、Kimi 或 GLM 总结转写稿
-- 管理 AI 总结 Prompt 版本，内置结构化总结与按时间戳话题总结
+- 配置多个 Qwen、豆包、DeepSeek、Kimi、GLM 或 OpenRouter 模型，并按顺序选择默认模型
+- 管理 AI 总结 Prompt 版本，内置结构化总结、按时间戳话题总结、决策备忘录与五问知识卡
 - 自动分段总结长转写稿并输出独立 Markdown 文档
 - 折叠侧栏和独立播放器控制
 
@@ -138,6 +137,9 @@ powershell -ExecutionPolicy Bypass -File .\install_native_host.ps1 -ExtensionId 
 Windows 支持目录选择、绝对路径保存、Qwen/豆包 ASR API 与 AI 总结 API。Windows
 暂不支持基于 MLX 的本地 Qwen3-ASR，请在“语音转写”中选择 API 模式。
 
+安装或更新 Native Host 后，请彻底退出所有 Chrome 进程再重新打开浏览器。仅关闭扩展
+窗口或点击“重新加载”可能不会刷新 Chrome 缓存的 Native Messaging 注册状态。
+
 ### 4. 可选：安装本地 Qwen3-ASR
 
 本地模式仅支持 Apple Silicon macOS。运行时安装在 Native Host 专属目录，不修改系统 Python：
@@ -157,9 +159,9 @@ chmod +x install_local_asr.sh
 ## 使用
 
 1. 点击扩展图标打开桌面窗口
-2. 登录小宇宙账号
+2. 点击“登录”，在打开的小宇宙官方窗口完成登录，再返回扩展点击“同步官方登录”；登录态只保存在当前浏览器会话中，连续 60 分钟无账户请求或关闭浏览器后需要重新授权
 3. 在“设置”中分别配置音频、文字稿和 AI 总结稿保存目录
-4. 默认使用小宇宙官方文字稿；没有官方稿或需要重新识别时，切换为本地 Qwen3-ASR、Qwen API 或豆包 API
+4. 在“文字稿与 ASR”中选择本地 Qwen3-ASR、Qwen API 或豆包 API
 5. 点击“AI 总结”会自动导出缺失的文字稿并生成总结；已有总结的单集会显示“已 AI 总结”，再次点击需确认
 6. 也可以在设置页选择已有 Markdown 转写稿直接总结
 
@@ -199,8 +201,19 @@ Fun-ASR-Flash 单次最多处理 5 分钟，长播客请使用 `qwen-audio-3.0-a
 该话题对应的连续转写内容……
 ```
 
-章节只采用节目 Show Notes 已有的话题时间戳。官方文字稿的 `startMs` 或 ASR 返回的
-句级时间仅用于把内容归入对应章节，不会逐条显示；节目没有提供时间轴时输出一份连续正文。
+章节只采用节目 Show Notes 已有的话题时间戳。ASR 返回的句级时间仅用于把内容归入
+对应章节，不会逐条显示；节目没有提供时间轴时输出一份连续正文。
+
+时间戳使用标准 HTTPS 单集链接：
+
+```text
+https://www.xiaoyuzhoufm.com/episode/<episode-id>?t=<seconds>
+```
+
+在 Obsidian 中点击后会由浏览器打开小宇宙官网。启用本扩展时，网页 Content
+Script 会在音频元数据加载或首次播放时定位到对应秒数；小宇宙官网本身不会处理
+`t` 参数。若只打开了单集页但没有跳转，请确认扩展版本不低于 `0.5.9`、扩展已启用，
+然后点击一次网页播放按钮。
 
 AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 
@@ -211,17 +224,18 @@ AI 总结默认使用 OpenAI-compatible Chat Completions 接口：
 | DeepSeek | `https://api.deepseek.com/chat/completions` | `deepseek-v4-flash` |
 | Kimi | `https://api.moonshot.cn/v1/chat/completions` | `kimi-k2.6` |
 | GLM | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | `glm-5.2` |
+| OpenRouter | `https://openrouter.ai/api/v1/chat/completions` | `qwen/qwen3.7-plus` |
 
-接口地址和模型均可在设置页修改。支持填写 API Base URL 或完整 `chat/completions` 地址，Native Host 会在对应 Provider 的官方 HTTPS 域名上自动补全路径。
+设置页首页只显示模型名称、简略信息、启用状态和凭据状态。Base URL、Model ID 与 API Key 位于模型详情弹窗中。首个启用模型为默认模型；模型可以新增、编辑、启停、排序和删除，最多保存 20 个。支持填写 API Base URL 或完整 `chat/completions` 地址，Native Host 会在对应 Provider 的官方 HTTPS 域名上自动补全路径。
 
-下载音频是独立操作，用户不需要在导出文字稿或 ASR 前手动下载。默认文字稿来源为小宇宙官方文字稿；没有官方稿时，用户可切换为 ASR。Qwen API 可直接使用音频 URL；本地 Qwen 会把音频下载到临时目录，任务结束即清理；豆包处理部分 M4A 时会在后台下载并转换音频。点击“AI 总结”时，扩展会复用同一单集已有的文字稿；没有文字稿时按当前来源导出或转写后再总结。
-
-“AI 总结”设置可选择是否补充评论，默认关闭。开启后读取当前单集公开评论，过滤“终于更新、沙发、我来啦、多多更新、等了好久”等低信息内容，最多发送 80 条、总计 20000 字符，不发送评论者昵称。内置 Prompt 会把评论严格标注为听众观点，不作为节目事实。
+下载音频是独立操作，用户不需要在 ASR 前手动下载。Qwen API 可直接使用音频 URL；本地 Qwen 会把音频下载到临时目录，任务结束即清理；豆包处理部分 M4A 时会在后台下载并转换音频。点击“AI 总结”时，扩展会复用同一单集已有的文字稿；没有文字稿时会先按当前 ASR 配置转写。扩展不请求小宇宙官方文字稿接口，也不读取评论。
 
 总结结果按单集记录在 Chrome 本地存储中。已有结果的按钮显示“已 AI 总结”，再次执行前会确认，且新文件不会覆盖旧文件。内置 Prompt 包含：
 
 - `播客结构化总结 · v1.0.0`：输出一句话摘要、一图速览、核心结论、内容脉络、行动建议、ASR 存疑等完整结构；该版本已替换旧的“播客结构化总结”内置版本。
 - `按时间戳话题总结`：保留原始时间戳链接，逐个话题总结所有有价值内容，不跨话题混合。
+- `决策备忘录 · v1.0.0`：提炼决策判断、成立与失效条件、可执行动作、风险反例和待验证事实，每条重要结论附可回查原文。
+- `五问知识卡 · v1.0.0`：以 5–8 个关键问题覆盖节目核心内容，每问包含答案、证据、定位和仍待核验的信息。
 
 内置版本只读，可复制为自定义版本后编辑、切换或删除。长转写稿会自动分段总结并统一去重，结果保存为：
 
@@ -235,13 +249,12 @@ AI 总结稿目录留空时沿用文字稿目录，已有用户升级后不会�
 
 完整隐私政策：[PRIVACY.md](PRIVACY.md)
 
-- 小宇宙登录凭证保存在 Chrome 扩展本地存储中
+- 小宇宙登录凭证仅保存在 Chrome 当前浏览器会话中，连续 60 分钟无账户请求或关闭浏览器后清除
 - ASR 和 AI 总结 API Key 由 Native Host 保存到 macOS Keychain 或 Windows DPAPI，扩展存储和项目文件中不保存明文 Key
 - 从旧版本升级时，Native Host 仅在 Keychain 写入并校验成功后删除旧的 `asr_credentials.json`；迁移失败会保留原文件
 - 选择本地 Qwen3-ASR 时，音频和转写均留在本机，不会自动回退到云端 API
-- 只有主动选择“ASR 生成”并点击导出文字稿或 AI 总结后，音频 URL 或音频内容才可能发送给所选 ASR 服务
-- 只有主动点击“AI 总结”后，转写稿才会发送给所选 AI 服务；开启评论补充时，首次执行前还会明确说明筛选后的公开评论将被发送
-- 评论补充默认关闭；评论原文不写入总结历史，仅记录实际采用条数
+- 只有主动点击 ASR 转写或 AI 总结后，音频 URL 或音频内容才可能发送给所选 ASR 服务
+- 只有主动点击“AI 总结”后，转写稿才会发送给所选 AI 服务；评论不会被读取或发送
 - 选择已有 Markdown 时，文件会先复制到已配置的转写稿目录；Native Host 只允许总结该目录内的 Markdown
 - 长转写稿按片段发送，Provider 的数据保留策略以对应服务条款为准
 - 项目不会把 API Key 写入扩展存储或仓库
@@ -252,8 +265,10 @@ AI 总结稿目录留空时沿用文字稿目录，已有用户升级后不会�
 
 | 权限 | 用途 |
 | --- | --- |
-| `storage` | 保存扩展设置和登录状态 |
+| `storage` | 保存扩展设置和当前浏览器会话中的登录状态 |
 | `windows` | 创建和管理独立桌面窗口 |
+| `cookies` | 用户主动同步官方登录后，读取 `xiaoyuzhoufm.com` 下的访问与刷新凭证以建立扩展登录态 |
+| `alarms` | 在连续 60 分钟无账户请求后清除当前浏览器会话的登录态 |
 | `clipboardWrite` | 复制节目和单集链接 |
 | `downloads` | 保存到浏览器默认下载目录 |
 | `nativeMessaging` | 调用本地 Native Host |
@@ -282,6 +297,7 @@ rm -rf "$HOME/Library/Application Support/Xiaoyuzhou Desktop Native Host"
 rm -f "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.xiaoyuzhou.desktop.json"
 security delete-generic-password -s com.xiaoyuzhou.desktop -a asr.qwen 2>/dev/null || true
 security delete-generic-password -s com.xiaoyuzhou.desktop -a asr.doubao 2>/dev/null || true
+security delete-generic-password -s com.xiaoyuzhou.desktop -a summary.models 2>/dev/null || true
 for account in summary.qwen summary.doubao summary.deepseek summary.kimi summary.glm; do
   security delete-generic-password -s com.xiaoyuzhou.desktop -a "$account" 2>/dev/null || true
 done
@@ -313,3 +329,4 @@ Remove-Item "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.xiaoyuzhou.d
 ## License
 
 [MIT](LICENSE)
+
