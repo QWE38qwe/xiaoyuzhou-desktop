@@ -160,8 +160,22 @@ const DEFAULT_SETTINGS = {
 
 const UPSTREAM = {
   api: "https://api.xiaoyuzhoufm.com",
-  auth: "https://podcaster-api.xiaoyuzhoufm.com"
+  // 网页端登录走 web-api；podcaster-api 是主播后台，不接受通用登录
+  auth: "https://web-api.xiaoyuzhoufm.com"
 };
+
+// 小宇宙网页端的 midway 应用标识，扫码登录接口会校验该请求头
+const WEB_AUTH_HEADERS = {
+  "Content-Type": "application/json",
+  "Accept": "application/json",
+  "App-Version": "5.7.0",
+  "Origin": "https://www.xiaoyuzhoufm.com",
+  "Referer": "https://www.xiaoyuzhoufm.com/",
+  "x-midway-app-id": "v6worU4NnWyL"
+};
+
+// 网页端扫码登录使用的 clientId
+const WEB_AUTH_CLIENT_ID = "podcaster-platform";
 
 const API_ENDPOINTS = {
   "/discovery": "/v1/discovery-feed/list",
@@ -171,7 +185,18 @@ const API_ENDPOINTS = {
   "/episode_detail": "/v1/episode/get",
   "/episode_list": "/v1/episode/list",
   "/subscription": "/v1/subscription/list",
-  "/subscription_update": "/v1/subscription/update"
+  "/subscription_update": "/v1/subscription/update",
+  // 播放进度：查询与上报（接口名与第三方客户端 ultrazg/xyz 一致）
+  "/playback_progress": "/v1/playback-progress/list",
+  "/playback_progress_update": "/v1/playback-progress/update",
+  // 收听历史
+  "/played_history": "/v1/episode-played/list-history",
+  // 播放记录（进入「最近听过」）
+  "/played_create": "/v1/episode-played/create",
+  // 收藏单集
+  "/favorite_update": "/v1/favorite/update",
+  // 节目内最受欢迎单集
+  "/episode_popular": "/v1/episode/list-by-filter"
 };
 
 const APP_HEADERS = {
@@ -410,7 +435,7 @@ async function getNativeHostStatus() {
     platform: platformHint,
     manifestPath: isWindows
       ? "%LOCALAPPDATA%\\Xiaoyuzhou Desktop Native Host\\com.xiaoyuzhou.desktop.json"
-      : "~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.xiaoyuzhou.desktop.json",
+      : "~/Library/Application Support/Mozilla/NativeMessagingHosts/com.xiaoyuzhou.desktop.json",
     hostPath: isWindows
       ? "%LOCALAPPDATA%\\Xiaoyuzhou Desktop Native Host\\native-host.exe"
       : "~/Library/Application Support/Xiaoyuzhou Desktop Native Host/native-host",
@@ -444,7 +469,7 @@ async function getNativeHostStatus() {
       available: true,
       ...data,
       manifestPath: home
-        ? `${home}/Library/Application Support/Google/Chrome/NativeMessagingHosts/${NATIVE_HOST}.json`
+        ? `${home}/Library/Application Support/Mozilla/NativeMessagingHosts/${NATIVE_HOST}.json`
         : base.manifestPath,
       hostPath: home
         ? `${home}/Library/Application Support/Xiaoyuzhou Desktop Native Host/native-host`
@@ -636,7 +661,7 @@ async function fetchEpisodeComments(episodeId) {
   if (!/^[A-Za-z0-9_-]+$/.test(eid)) {
     throw new Error("无法识别需要抓取评论的单集");
   }
-  const response = await fetch(
+  const response = await guardedFetch(
     `https://www.xiaoyuzhoufm.com/episode/${encodeURIComponent(eid)}`,
     {
       method: "GET",
@@ -713,7 +738,7 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
     headers["x-jike-refresh-token"] = auth.refreshToken;
   }
 
-  const response = await fetch(url, {
+  const response = await guardedFetch(url, {
     method,
     headers,
     body: method === "GET" ? undefined : JSON.stringify(body ?? {})
@@ -727,7 +752,6 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
   }
 
   // #region debug-point A:episode-detail-shape
-  if (globalThis.__XYZ_DEBUG_PLATFORM_TRANSCRIPT__ && path === "/episode_detail") fetch("http://127.0.0.1:7777/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "platform-transcript-source", runId: "pre-fix", hypothesisId: "A", location: "background.js:requestJson", msg: "[DEBUG] Episode detail response observed", data: { status: response.status, topLevelKeys: Object.keys(data || {}).slice(0, 20), episodeKeys: Object.keys(data?.data || {}).filter((key) => /^(eid|media|transcript|shownotes|duration)$/i.test(key)).sort() }, ts: Date.now() }) }).catch(() => {});
   // #endregion
 
   if (response.status === 401 && retry && auth?.refreshToken) {
@@ -748,7 +772,7 @@ async function refreshToken(auth) {
   const url = settings.apiMode === "proxy" && settings.proxyBaseUrl
     ? proxyUrl(settings.proxyBaseUrl, "/refresh_token")
     : upstreamUrl("/app_auth_tokens.refresh");
-  const response = await fetch(url, {
+  const response = await guardedFetch(url, {
     method: "POST",
     headers: withAppHeaders(auth, { "x-jike-refresh-token": auth.refreshToken }),
     body: settings.apiMode === "proxy" ? JSON.stringify({
@@ -760,7 +784,7 @@ async function refreshToken(auth) {
     await clearAuth();
     throw new Error("登录已过期，请重新登录");
   }
-  const json = await response.json();
+  const json = await readJsonSafe(response, "刷新登录状态失败");
   const next = {
     ...auth,
     accessToken: json?.data?.accessToken || json?.data?.access_token || json?.data?.["x-jike-access-token"] || response.headers.get("x-jike-access-token") || auth.accessToken,
@@ -769,43 +793,91 @@ async function refreshToken(auth) {
   return saveAuth(next);
 }
 
-async function loginWithSms({ areaCode = "+86", mobilePhoneNumber, verifyCode }) {
-  const settings = await getSettings();
-  const path = "/v1/auth/login-with-sms";
-  const url = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, "/login")
-    : upstreamUrl(path);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { ...APP_HEADERS, Origin: "https://podcaster.xiaoyuzhoufm.com" },
-    body: JSON.stringify({ areaCode, mobilePhoneNumber, verifyCode })
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || data?.msg || "登录失败");
-  const auth = {
-    user: data?.data?.user || data?.data?.data || data?.data || data?.user || null,
-    accessToken: data?.data?.accessToken || data?.data?.access_token || data?.data?.["x-jike-access-token"] || response.headers.get("x-jike-access-token"),
-    refreshToken: data?.data?.refreshToken || data?.data?.refresh_token || data?.data?.["x-jike-refresh-token"] || response.headers.get("x-jike-refresh-token"),
-    deviceId: crypto.randomUUID()
-  };
-  if (!auth.accessToken) throw new Error("登录成功但没有收到访问凭证");
-  return saveAuth(auth);
+function webAuthUrl(path) {
+  return `${UPSTREAM.auth}${path}`;
 }
 
-async function sendSmsCode({ areaCode = "+86", mobilePhoneNumber }) {
-  const settings = await getSettings();
-  const path = "/v1/auth/send-code";
-  const url = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, "/send-code")
-    : upstreamUrl(path);
-  const response = await fetch(url, {
+function authFromPayload(payload, response) {
+  const data = payload?.data ?? payload ?? {};
+  return {
+    user: data.user || data.data?.user || null,
+    accessToken: data.accessToken
+      || data.access_token
+      || data["x-jike-access-token"]
+      || response?.headers?.get("x-jike-access-token")
+      || null,
+    refreshToken: data.refreshToken
+      || data.refresh_token
+      || data["x-jike-refresh-token"]
+      || response?.headers?.get("x-jike-refresh-token")
+      || null,
+    deviceId: crypto.randomUUID()
+  };
+}
+
+// 创建扫码登录二维码，返回 { id, url }
+async function createLoginQrcode() {
+  const response = await guardedFetch(webAuthUrl("/v1/auth/qrcode/create"), {
     method: "POST",
-    headers: { ...APP_HEADERS, Origin: "https://podcaster.xiaoyuzhoufm.com" },
-    body: JSON.stringify({ areaCode, mobilePhoneNumber })
+    headers: WEB_AUTH_HEADERS,
+    body: JSON.stringify({ clientId: WEB_AUTH_CLIENT_ID })
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || data?.msg || "验证码发送失败");
-  return data;
+  const payload = await readJsonSafe(response, "无法创建登录二维码");
+  if (!response.ok || !payload?.id || !payload?.url) {
+    throw new Error(payload?.toast || payload?.message || "无法创建登录二维码");
+  }
+  return { id: payload.id, url: payload.url };
+}
+
+// 轮询扫码状态；扫码确认后服务端返回登录凭证
+async function pollLoginQrcode({ id }) {
+  if (!id) throw new Error("登录二维码已失效，请重新获取");
+  const response = await guardedFetch(webAuthUrl("/v1/auth/qrcode/login"), {
+    method: "POST",
+    headers: WEB_AUTH_HEADERS,
+    body: JSON.stringify({ id })
+  });
+  const payload = await readJsonSafe(response, "查询扫码状态失败");
+  if (!response.ok) {
+    throw new Error(payload?.toast || payload?.message || "查询扫码状态失败");
+  }
+  const status = String(payload?.status || "").toUpperCase();
+  if (status === "WAITTING" || status === "WAITING") {
+    return { status: "waiting" };
+  }
+  const auth = authFromPayload(payload, response);
+  if (!auth.accessToken) {
+    if (status === "SCANNED") return { status: "scanned" };
+    if (status === "EXPIRED") return { status: "expired" };
+    if (status === "CANCELED" || status === "CANCELLED") return { status: "canceled" };
+    return { status: status ? status.toLowerCase() : "waiting" };
+  }
+  await saveAuth(auth);
+  return { status: "authorized", user: auth.user };
+}
+
+async function readJsonSafe(response, fallbackMessage) {
+  const contentType = response.headers.get("content-type") || "";
+  const raw = await response.text();
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error(`${fallbackMessage}（响应无法解析）`);
+    }
+  }
+  const snippet = raw.replace(/\s+/g, " ").trim().slice(0, 120);
+  if (response.status === 401) {
+    throw new Error(`${fallbackMessage}：登录状态已失效，请重新扫码登录`);
+  }
+  if (response.status === 404) {
+    throw new Error(`${fallbackMessage}：接口地址已变更`);
+  }
+  throw new Error(`${fallbackMessage}（HTTP ${response.status}${snippet ? `：${snippet}` : ""}）`);
+}
+
+async function guardedFetch(url, init) {
+  return fetch(url, init);
 }
 
 async function fetchApi({ endpoint, method = "POST", body = {} }) {
@@ -884,10 +956,10 @@ async function handleMessage(message) {
       return getSummaryHistory();
     case "update-settings":
       return updateSettings(message.settings);
-    case "send-code":
-      return sendSmsCode(message.payload);
-    case "login":
-      return loginWithSms(message.payload);
+    case "create-login-qrcode":
+      return createLoginQrcode();
+    case "poll-login-qrcode":
+      return pollLoginQrcode(message.payload || {});
     case "api":
       return fetchApi(message.payload);
     case "download-audio":
@@ -935,12 +1007,22 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (!settings) await chrome.storage.local.set({ [SETTINGS_KEY]: DEFAULT_SETTINGS });
 });
 
+async function rememberWindowBounds(window) {
+  if (!window || window.state !== "normal") return;
+  await chrome.storage.local.set({
+    [BOUNDS_KEY]: sanitizeBounds({
+      width: window.width,
+      height: window.height,
+      left: window.left,
+      top: window.top
+    })
+  });
+}
+
 chrome.windows.onBoundsChanged.addListener(async (window) => {
   const current = await storedWindow();
-  if (!current || current.id !== window.id || window.state !== "normal") return;
-  await chrome.storage.local.set({
-    [BOUNDS_KEY]: sanitizeBounds({ width: window.width, height: window.height, left: window.left, top: window.top })
-  });
+  if (!current || current.id !== window.id) return;
+  await rememberWindowBounds(window);
 });
 
 chrome.windows.onRemoved.addListener(async (windowId) => {
