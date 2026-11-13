@@ -539,7 +539,7 @@ async function loadTopList(tabKey) {
 
 function switchDiscoverTab(tabKey) {
   state.discoverTab = tabKey;
-  $(".feed-tab").forEach((tab) => {
+  $$(".feed-tab").forEach((tab) => {
     tab.classList.toggle("is-active", tab.dataset.discoverTab === tabKey);
   });
   const banner = $("#discover-banner");
@@ -645,7 +645,7 @@ function bindDiscoverFeed() {
       refreshDiscovery().catch((error) => notify(error.message));
     }
   });
-  $(".feed-tab").forEach((tab) => {
+  $$(".feed-tab").forEach((tab) => {
     tab.addEventListener("click", () => switchDiscoverTab(tab.dataset.discoverTab));
   });
 }
@@ -1026,12 +1026,12 @@ async function renderPlaylistPage(root) {
   });
   holder.addEventListener("dragend", (event) => {
     event.target.closest(".playlist-item")?.classList.remove("is-dragging");
-    $(".playlist-item.is-drop-target", holder).forEach(el => el.classList.remove("is-drop-target"));
+    $$(".playlist-item.is-drop-target", holder).forEach(el => el.classList.remove("is-drop-target"));
   });
   holder.addEventListener("drop", (event) => {
     event.preventDefault();
     const item = event.target.closest(".playlist-item");
-    $(".playlist-item.is-drop-target", holder).forEach(el => el.classList.remove("is-drop-target"));
+    $$(".playlist-item.is-drop-target", holder).forEach(el => el.classList.remove("is-drop-target"));
     if (!item || dragIndex == null) return;
     const toIndex = Number(item.dataset.index);
     if (dragIndex !== toIndex) {
