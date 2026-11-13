@@ -451,9 +451,11 @@ const DISCOVER_PAGE_SIZE = 18;
 const DISCOVER_MAX_PAGES = 30;
 
 function appendFeedCards(holder, items, startIndex) {
-  const html = items.map((item, offset) => podcastCard(item, startIndex + offset)).join("");
-  holder.insertAdjacentHTML("beforeend", html);
-  bindCardActions(holder, state.feed);
+  const container = document.createElement("div");
+  container.innerHTML = items.map((item, offset) => podcastCard(item, startIndex + offset)).join("");
+  const newCards = [...container.children];
+  newCards.forEach((card) => holder.appendChild(card));
+  bindCardActions(holder, state.feed, newCards);
 }
 
 function updateDiscoverCount() {
@@ -723,8 +725,9 @@ function favoriteActionLabel(item) {
   return state.favorites?.has(eid) ? "取消收藏" : "收藏单集";
 }
 
-function bindCardActions(holder, items) {
-  $$(".podcast-card", holder).forEach((card) => {
+function bindCardActions(holder, items, specificCards = null) {
+  const targets = specificCards ? specificCards.filter((el) => el.classList.contains("podcast-card")) : $(".podcast-card", holder);
+  targets.forEach((card) => {
     card.addEventListener("click", (event) => {
       const item = items[Number(card.dataset.index)];
       const control = event.target.closest("button, summary");
@@ -974,7 +977,7 @@ async function renderPlaylistPage(root) {
   const counter = $("#playlist-count");
   const currentEid = episodeIdOf(state.current);
   if (counter) {
-    const totalSecs = list.reduce((sum, item) => sum + (Number(item.duration) || 0), 0);
+    const totalSecs = list.reduce((sum, item) => sum + (Number(item?.duration) || 0), 0);
     const timeStr = totalSecs > 0 ? ` · 约 ${Math.round(totalSecs / 60)} 分钟` : "";
     counter.textContent = `${list.length} 集${timeStr}`;
   }
@@ -1187,8 +1190,8 @@ function updatePlaylistBadges(count) {
 
 async function loadPlaylist() {
   try {
-    const { [PLAYLIST_KEY]: list = [] } = await chrome.storage.local.get(PLAYLIST_KEY);
-    const valid = Array.isArray(list) ? list : [];
+    const { [PLAYLIST_KEY]: raw = [] } = await chrome.storage.local.get(PLAYLIST_KEY);
+    const valid = (Array.isArray(raw) ? raw : []).filter((item) => item && typeof item === "object" && episodeIdOf(item));
     state.playlist = valid;
     updatePlaylistBadges(valid.length);
     return valid;
@@ -1302,12 +1305,12 @@ async function playNextInPlaylist() {
   const list = await loadPlaylist();
   if (!list.length) return;
   let next = 0;
-  if (state.playlistIndex != null) {
-    next = state.playlistIndex + 1;
-  } else if (state.current) {
-    const curEid = episodeIdOf(state.current);
+  const curEid = episodeIdOf(state.current);
+  if (curEid) {
     const idx = list.findIndex(e => episodeIdOf(e) === curEid);
     next = idx >= 0 ? idx + 1 : 0;
+  } else if (state.playlistIndex != null) {
+    next = state.playlistIndex + 1;
   }
   if (next >= list.length) {
     state.playlistIndex = null;
