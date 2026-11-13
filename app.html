@@ -20,6 +20,7 @@
         <nav class="main-nav" aria-label="主导航">
           <button class="nav-item is-active" data-route="discover"><span class="nav-icon">✦</span><span>发现</span></button>
           <button class="nav-item" data-route="search"><span class="nav-icon">⌕</span><span>搜索</span></button>
+          <button class="nav-item" data-route="playlist"><span class="nav-icon">☰</span><span>播放列表</span><span id="nav-playlist-badge" class="nav-badge" hidden>0</span></button>
           <button class="nav-item" data-route="history"><span class="nav-icon">◴</span><span>最近听过</span></button>
           <button class="nav-item" data-route="subscriptions"><span class="nav-icon">◒</span><span>我的订阅</span></button>
           <button class="nav-item" data-route="settings"><span class="nav-icon">⚙</span><span>设置</span></button>
@@ -40,6 +41,11 @@
             <button id="account-button" class="account-button">登录</button>
           </div>
         </header>
+
+        <div id="permission-banner" class="permission-banner" hidden>
+          <span>Firefox 未授予访问小宇宙域名的权限，部分功能会失败。</span>
+          <button id="permission-grant" type="button" class="primary-button">授权访问</button>
+        </div>
 
         <section id="page-content" class="page-content" aria-live="polite"></section>
       </main>
@@ -72,6 +78,7 @@
               <span id="volume-value" class="volume-value">100</span>
             </div>
           </div>
+          <button id="player-queue-button" class="player-link-button" type="button" title="查看待播清单">待播 <span id="player-queue-badge" class="queue-badge" hidden>0</span></button>
           <button id="view-podcast-button" class="player-link-button" title="查看当前节目" disabled>查看节目</button>
           <button id="summarize-button" class="player-link-button is-accent" title="导出文字稿并总结当前单集" disabled>AI 总结</button>
           <details id="player-more-menu" class="action-menu action-menu-player">
@@ -82,6 +89,8 @@
               <button id="copy-episode-link-button" role="menuitem" disabled>复制单集链接</button>
               <button id="copy-podcast-link-button" role="menuitem" disabled>复制节目链接</button>
               <button id="speed-button" role="menuitem">播放速度 · 1×</button>
+              <button id="favorite-button" role="menuitem">收藏单集</button>
+              <button id="add-playlist-button" role="menuitem">加入播放列表</button>
             </div>
           </details>
         </div>

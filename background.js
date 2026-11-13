@@ -190,7 +190,13 @@ const API_ENDPOINTS = {
   "/playback_progress": "/v1/playback-progress/list",
   "/playback_progress_update": "/v1/playback-progress/update",
   // 收听历史
-  "/played_history": "/v1/episode-played/list-history"
+  "/played_history": "/v1/episode-played/list-history",
+  // 播放记录（进入「最近听过」）
+  "/played_create": "/v1/episode-played/create",
+  // 收藏单集
+  "/favorite_update": "/v1/favorite/update",
+  // 节目内最受欢迎单集
+  "/episode_popular": "/v1/episode/list-by-filter"
 };
 
 const APP_HEADERS = {

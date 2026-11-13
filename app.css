@@ -287,3 +287,316 @@ button:disabled { cursor: not-allowed; }
   .feed-grid { grid-template-columns: 1fr; }
 }
 
+
+.permission-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(233, 131, 118, 0.45);
+  border-radius: 12px;
+  background: rgba(233, 131, 118, 0.12);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.permission-banner[hidden] { display: none; }
+.permission-banner .primary-button { flex: none; }
+
+.login-qrcode {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  margin: 18px 0 6px;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.login-qrcode canvas {
+  display: block;
+  image-rendering: pixelated;
+  max-width: 100%;
+}
+.login-qrcode .code-status {
+  margin: 0;
+  text-align: center;
+}
+.code-status.is-error { color: #b4453a; }
+.code-status.is-pending { color: var(--ink-soft); }
+.code-status.is-success { color: #377551; }
+
+
+/* 音量控件：默认收起成一个图标，点击展开滑块，避免挤压播放器右侧按钮区 */
+.volume-control {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  position: relative;
+}
+.volume-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  height: 26px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  transition: background .15s, border-color .15s;
+  width: 26px;
+}
+.volume-button:hover,
+.volume-control[data-volume-expanded="true"] .volume-button {
+  background: var(--paper-deep);
+  border-color: var(--line);
+}
+.volume-button.is-muted { opacity: .65; }
+.volume-button:focus-visible {
+  border-color: var(--blue);
+  outline: none;
+}
+.volume-slider-wrap {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-width .18s ease, opacity .18s ease;
+}
+.volume-control[data-volume-expanded="true"] .volume-slider-wrap {
+  max-width: 120px;
+  opacity: 1;
+}
+.volume-slider-wrap input[type="range"] {
+  accent-color: var(--ink);
+  cursor: pointer;
+  margin: 0;
+  width: 78px;
+}
+.volume-value {
+  color: var(--ink-soft);
+  font: 10px "DM Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  min-width: 22px;
+  text-align: right;
+}
+
+
+/* 信息流：标题栏动作区、计数、加载更多哨兵 */
+.section-heading-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+.feed-count {
+  color: var(--ink-soft);
+  font: 10px "DM Mono", monospace;
+  letter-spacing: .07em;
+}
+#discover-refresh {
+  background: var(--paper-deep);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 11px;
+  padding: 5px 10px;
+}
+#discover-refresh:hover { background: var(--yellow); }
+#discover-refresh:disabled { cursor: not-allowed; opacity: .6; }
+.feed-sentinel {
+  min-height: 1px;
+  padding-top: 14px;
+}
+.feed-more {
+  color: var(--ink-soft);
+  font: 11px "DM Mono", monospace;
+  padding: 16px 0 24px;
+  text-align: center;
+}
+
+
+/* 收听历史卡片：在卡片下方显示上次播放位置 */
+.history-progress {
+  color: var(--ink-soft);
+  display: inline-block;
+  font: 10px "DM Mono", monospace;
+  margin-top: 6px;
+  width: 100%;
+}
+
+
+/* 播放列表 */
+.playlist-list {
+  display: grid;
+  gap: 1px;
+  margin-top: 12px;
+}
+.playlist-item {
+  align-items: center;
+  background: rgba(255,255,255,.32);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 36px 52px minmax(0, 1fr) auto;
+  padding: 12px 14px;
+}
+.playlist-item:hover { background: rgba(255,255,255,.55); }
+.playlist-item.is-drop-target {
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 1px var(--yellow);
+}
+.playlist-item-index {
+  color: var(--ink-soft);
+  font: 11px "DM Mono", monospace;
+  text-align: center;
+}
+.playlist-item-cover {
+  background: var(--paper-deep);
+  height: 52px;
+  overflow: hidden;
+  width: 52px;
+}
+.playlist-item-cover img { height: 100%; object-fit: cover; width: 100%; }
+.playlist-item-cover span {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 20px;
+  height: 100%;
+  justify-content: center;
+}
+.playlist-item-copy { display: flex; flex-direction: column; min-width: 0; }
+.playlist-item-copy strong {
+  font-family: "Noto Serif SC", serif;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.playlist-item-copy span {
+  color: var(--ink-soft);
+  font-size: 10px;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.playlist-item-actions { display: flex; gap: 6px; }
+.playlist-item[draggable="true"] { cursor: grab; }
+.playlist-item[draggable="true"]:active { cursor: grabbing; }
+
+/* 导航与播放器徽标 */
+.nav-badge, .queue-badge {
+  background: var(--coral);
+  border-radius: 9px;
+  color: #fff;
+  font: 700 9px/14px "DM Mono", monospace;
+  min-width: 16px;
+  padding: 0 4px;
+  text-align: center;
+}
+.nav-item .nav-badge {
+  margin-left: auto;
+}
+.queue-badge {
+  background: var(--yellow);
+  color: var(--ink);
+  font-size: 10px;
+  margin-left: 3px;
+  padding: 1px 5px;
+}
+
+/* 播放列表正在播放状态 */
+.playlist-item.is-current {
+  background: rgba(245, 206, 67, 0.16);
+  border-color: var(--yellow);
+}
+.playlist-item.is-current strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+.drag-handle {
+  color: var(--ink-soft);
+  cursor: grab;
+  font-size: 14px;
+  line-height: 1;
+  opacity: .5;
+  padding: 4px;
+  user-select: none;
+}
+.drag-handle:hover { opacity: 1; }
+
+/* 发现页多榜单与分类 Tabs */
+.feed-tabs-row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 16px;
+  overflow-x: auto;
+}
+.feed-tab {
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 14px;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+.feed-tab:hover {
+  background: rgba(255,255,255,.8);
+  color: var(--ink);
+}
+.feed-tab.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+  font-weight: 600;
+}
+.feed-banner-info {
+  background: rgba(255,255,255,.4);
+  border-left: 3px solid var(--yellow);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+  padding: 8px 12px;
+}
+
+/* 播客详情页：最受欢迎单集专区 */
+.popular-episodes-section {
+  background: rgba(255,255,255,.3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 16px 0 24px;
+  padding: 16px 18px;
+}
+.popular-episodes-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.popular-episodes-heading h3 {
+  font-family: "Noto Serif SC", serif;
+  font-size: 15px;
+  margin: 0;
+}
+.popular-badge {
+  background: rgba(233, 131, 118, 0.15);
+  border-radius: 4px;
+  color: #c44e40;
+  font: 700 10px/1 "DM Mono", monospace;
+  padding: 3px 6px;
+}
+.popular-list {
+  display: grid;
+  gap: 1px;
+}
