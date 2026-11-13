@@ -726,7 +726,10 @@ function favoriteActionLabel(item) {
 }
 
 function bindCardActions(holder, items, specificCards = null) {
-  const targets = specificCards ? specificCards.filter((el) => el.classList.contains("podcast-card")) : $(".podcast-card", holder);
+  const targets = specificCards
+    ? specificCards.filter((el) => el && el.classList && el.classList.contains("podcast-card"))
+    : $$(".podcast-card", holder);
+  if (!Array.isArray(targets)) return;
   targets.forEach((card) => {
     card.addEventListener("click", (event) => {
       const item = items[Number(card.dataset.index)];
