@@ -25,7 +25,16 @@ const SUMMARY_PROVIDERS = [
   { id: "glm", label: "GLM", keyField: "summaryGlmApiKey" }
 ];
 
+const { proxyOrigin, summaryConsentScope, hasSummaryConsent } = globalThis.XYZSettingsPolicy;
+let openEpisodeSeq = 0;
+
 const state = {
+  discoverSeq: 0,
+  viewSeq: 0,
+  positionVersion: 0,
+  pendingPosition: null,
+  playlistNextEid: undefined,
+  playedMarkPending: new Set(),
   route: "discover",
   searchType: "episode",
   feed: [],
@@ -79,14 +88,15 @@ const SEARCH_TYPE_LABELS = {
   podcast: "节目"
 };
 
-function send(type, payload = {}) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type, ...payload }, (response) => {
-      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-      if (!response?.ok) return reject(new Error(response?.error || "请求失败"));
-      resolve(response.data);
-    });
-  });
+async function send(type, payload = {}) {
+  let response;
+  try {
+    response = await chrome.runtime.sendMessage({ type, ...payload });
+  } catch (error) {
+    throw new Error(error?.message || "请求失败");
+  }
+  if (!response?.ok) throw new Error(response?.error || "请求失败");
+  return response.data;
 }
 
 function api(endpoint, body = {}, method = "POST") {
@@ -410,6 +420,13 @@ function markConnection() {
 }
 
 function renderRoute() {
+  state.viewSeq += 1;
+  if (state.route !== "discover" || state.episodeView || state.podcastView) {
+    state.discoverSeq += 1;
+    state.feedLoading = false;
+    state.feedObserver?.disconnect();
+    state.feedObserver = null;
+  }
   const root = $("#page-content");
   if (state.episodeView) return renderEpisodePage(root);
   if (state.podcastView) return renderPodcastPage(root);
@@ -422,6 +439,7 @@ function renderRoute() {
 }
 
 function renderDiscoverPage(root) {
+  state.discoverTab = "curated";
   root.innerHTML = `
     <section class="hero">
       <div><div class="route-eyebrow">THE DAILY FREQUENCY</div><h1>今天，听点<br /><span>不一样的。</span></h1><p>从精选节目、热门单集和你可能喜欢的声音里，挑一段刚好适合此刻的陪伴。</p></div>
@@ -455,6 +473,7 @@ function appendFeedCards(holder, items, startIndex) {
   container.innerHTML = items.map((item, offset) => podcastCard(item, startIndex + offset)).join("");
   const newCards = [...container.children];
   newCards.forEach((card) => holder.appendChild(card));
+  // 仅对新追加的卡片挂载监听，旧卡片不重复监听
   bindCardActions(holder, state.feed, newCards);
 }
 
@@ -493,10 +512,15 @@ async function fetchDiscoveryPage({ loadMoreKey = "" } = {}) {
 }
 
 async function loadTopList(tabKey) {
+  const mySeq = ++state.discoverSeq;
   const holder = $("#discover-feed");
   const banner = $("#discover-banner");
   const sentinel = $("#discover-sentinel");
   if (!holder) return;
+  state.feed = [];
+  state.feedLoadMoreKey = "";
+  state.feedLoading = false;
+  state.feedExhausted = true;
   if (sentinel) sentinel.innerHTML = "";
   if (state.feedObserver) {
     state.feedObserver.disconnect();
@@ -514,6 +538,7 @@ async function loadTopList(tabKey) {
 
   try {
     const response = await api("/top_list", { category: categoryEnum }, "GET");
+    if (mySeq !== state.discoverSeq || $("#discover-feed") !== holder) return;
     const rawData = response?.data?.data || response?.data || response;
     const items = extractContent(rawData);
     const info = rawData?.information || rawData?.title || "";
@@ -534,6 +559,7 @@ async function loadTopList(tabKey) {
     const counter = $("#discover-count");
     if (counter) counter.textContent = `${items.length} 个节目`;
   } catch (error) {
+    if (mySeq !== state.discoverSeq || $("#discover-feed") !== holder) return;
     holder.innerHTML = `<div class="empty">${esc(error.message)}<br /><button class="mini-button" data-retry-top>重新加载</button></div>`;
     holder.querySelector("[data-retry-top]")?.addEventListener("click", () => loadTopList(tabKey));
   }
@@ -541,7 +567,7 @@ async function loadTopList(tabKey) {
 
 function switchDiscoverTab(tabKey) {
   state.discoverTab = tabKey;
-  $$(".feed-tab").forEach((tab) => {
+  $$("[data-discover-tab]").forEach((tab) => {
     tab.classList.toggle("is-active", tab.dataset.discoverTab === tabKey);
   });
   const banner = $("#discover-banner");
@@ -556,18 +582,23 @@ function switchDiscoverTab(tabKey) {
 }
 
 async function refreshDiscovery() {
+  const mySeq = ++state.discoverSeq;
   const holder = $("#discover-feed");
   if (!holder) return;
   state.feed = [];
   state.feedLoadMoreKey = "";
   state.feedExhausted = false;
-  state.feedLoading = false;
+  state.feedLoading = true;
   state.feedPages = 0;
+  state.feedObserver?.disconnect();
+  state.feedObserver = null;
   holder.innerHTML = `<div class="loading">正在接收今天的声音……</div>`;
   renderFeedStatus("");
   try {
     const page = await fetchDiscoveryPage();
+    if (mySeq !== state.discoverSeq || $("#discover-feed") !== holder) return;
     if (!page.items.length) {
+      state.feedExhausted = true;
       holder.innerHTML = `<div class="empty">暂无发现内容。请确认登录状态或稍后重试。</div>`;
       updateDiscoverCount();
       return;
@@ -585,12 +616,18 @@ async function refreshDiscovery() {
       startFeedObserver();
     }
   } catch (error) {
+    if (mySeq !== state.discoverSeq || $("#discover-feed") !== holder) return;
     holder.innerHTML = `<div class="empty">${esc(error.message)}<br /><button class="mini-button" data-action="login">去登录</button></div>`;
     holder.querySelector("[data-action=login]")?.addEventListener("click", openLogin);
+  } finally {
+    if (mySeq === state.discoverSeq) state.feedLoading = false;
   }
 }
 
 async function loadMoreDiscovery() {
+  const mySeq = state.discoverSeq;
+  const holder = $("#discover-feed");
+  if (!holder || state.discoverTab !== "curated") return;
   if (state.feedLoading || state.feedExhausted || !state.feedLoadMoreKey) return;
   if (state.feedPages >= DISCOVER_MAX_PAGES) {
     state.feedExhausted = true;
@@ -601,7 +638,7 @@ async function loadMoreDiscovery() {
   renderFeedStatus("正在加载更多……");
   try {
     const page = await fetchDiscoveryPage({ loadMoreKey: state.feedLoadMoreKey });
-    const holder = $("#discover-feed");
+    if (mySeq !== state.discoverSeq || $("#discover-feed") !== holder) return;
     if (!page.items.length) {
       state.feedExhausted = true;
       renderFeedStatus("已经到底了");
@@ -633,9 +670,9 @@ async function loadMoreDiscovery() {
       renderFeedStatus("");
     }
   } catch (error) {
-    renderFeedStatus(`加载失败：${error.message}`);
+    if (mySeq === state.discoverSeq && $("#discover-feed") === holder) renderFeedStatus(`加载失败：${error.message}`);
   } finally {
-    state.feedLoading = false;
+    if (mySeq === state.discoverSeq) state.feedLoading = false;
   }
 }
 
@@ -647,7 +684,7 @@ function bindDiscoverFeed() {
       refreshDiscovery().catch((error) => notify(error.message));
     }
   });
-  $$(".feed-tab").forEach((tab) => {
+  $$("[data-discover-tab]").forEach((tab) => {
     tab.addEventListener("click", () => switchDiscoverTab(tab.dataset.discoverTab));
   });
 }
@@ -726,15 +763,16 @@ function favoriteActionLabel(item) {
 }
 
 function bindCardActions(holder, items, specificCards = null) {
-  const targets = specificCards
-    ? specificCards.filter((el) => el && el.classList && el.classList.contains("podcast-card"))
-    : $$(".podcast-card", holder);
-  if (!Array.isArray(targets)) return;
+  const candidates = specificCards == null ? $$(".podcast-card", holder) : specificCards;
+  const targets = Array.isArray(candidates) || typeof candidates?.[Symbol.iterator] === "function"
+    ? Array.from(candidates).filter((el) => el?.classList?.contains("podcast-card")) : [];
   targets.forEach((card) => {
     card.addEventListener("click", (event) => {
-      const item = items[Number(card.dataset.index)];
+      const index = Number(card.dataset.index);
+      const item = Number.isInteger(index) && index >= 0 ? items?.[index] : null;
+      if (!item) return;
       const control = event.target.closest("button, summary");
-      if (!control) return isPodcastItem(item) ? openPodcast(item) : openEpisode(item);
+      if (!control) return isPodcastItem(item) ? openPodcast(item) : showEpisodeDetail(item);
       if (control.tagName === "SUMMARY") return;
       const action = control.dataset.cardAction;
       closeActionMenu(control);
@@ -806,6 +844,7 @@ async function performSearch() {
 }
 
 function renderSearchResults(holder, { loading = false } = {}) {
+  if (!holder || $("#search-results") !== holder) return;
   const activeType = state.searchType;
   const label = SEARCH_TYPE_LABELS[activeType] || "内容";
   const results = state.searchResultsByType[activeType];
@@ -877,11 +916,13 @@ function searchResultRow(item, index) {
 
 function bindSearchRows(holder, items) {
   $$(".episode-row", holder).forEach((row) => row.addEventListener("click", (event) => {
-    const item = items[Number(row.dataset.index)];
+    const index = Number(row.dataset.index);
+    const item = Number.isInteger(index) && index >= 0 ? items?.[index] : null;
+    if (!item) return;
     const control = event.target.closest("button, summary");
     if (!control) {
       if (isPodcastItem(item)) openPodcast(item);
-      else if (episodeIdOf(item)) openEpisode(item);
+      else if (episodeIdOf(item)) showEpisodeDetail(item);
       return;
     }
     if (control.tagName === "SUMMARY") return;
@@ -895,6 +936,8 @@ function bindSearchRows(holder, items) {
     }
     if (action === "play") openEpisode(item);
     if (action === "view-podcast") openPodcast(item);
+    if (action === "add-playlist") addToPlaylist(item);
+    if (action === "play-next") addToPlaylist(item, { playNext: true });
     if (action === "summarize") summarizeEpisode(item, control).catch((error) => notify(error.message));
     if (action === "subscribe") toggleSubscription(item, control);
     if (action === "download") downloadEpisodeAudio(item);
@@ -937,18 +980,22 @@ async function loadHistory() {
     state.history = items;
     // 把各集进度合并进来，用于显示「上次听到 X」
     const progress = await fetchPlaybackProgress(items.map((item) => episodeIdOf(item)));
+    if ($("#history-list") !== holder) return;
     holder.innerHTML = items.length
       ? items.map((item, index) => {
-        const card = podcastCard(item, index);
         const seconds = progress.get(episodeIdOf(item))?.seconds;
         const label = Number.isFinite(seconds) && seconds > 0
           ? `<span class="history-progress">上次听到 ${esc(formatTime(seconds))}</span>`
           : "";
-        return card.replace("</article>", label + "</article>");
+        return podcastCard(item, index).replace(
+          "</article>",
+          `<div class="history-progress-wrap">${label}</div></article>`
+        );
       }).join("")
       : `<div class="empty">还没有收听记录。去发现页找一集听听吧。</div>`;
     bindCardActions(holder, items);
   } catch (error) {
+    if ($("#history-list") !== holder) return;
     holder.innerHTML = `<div class="empty">${esc(error.message)}<br /><button class="mini-button" data-action="login">去登录</button></div>`;
     holder.querySelector("[data-action=login]")?.addEventListener("click", openLogin);
   }
@@ -975,8 +1022,12 @@ async function renderPlaylistPage(root) {
     <div id="playlist-list" class="playlist-list"><div class="loading">正在读取播放列表……</div></div>
   </section>`;
   const holder = $("#playlist-list");
-  const list = await loadPlaylist();
-  state.playlist = list;
+  let list;
+  try { list = await loadPlaylist(); } catch (error) {
+    if ($("#playlist-list") === holder) holder.textContent = error.message;
+    return;
+  }
+  if ($("#playlist-list") !== holder) return;
   const counter = $("#playlist-count");
   const currentEid = episodeIdOf(state.current);
   if (counter) {
@@ -1002,23 +1053,23 @@ async function renderPlaylistPage(root) {
         <span>${esc(entry.podcastTitle)}${entry.duration ? ` · ${formatTime(entry.duration)}` : ""}${isPlaying ? " (正在播放)" : ""}</span>
       </div>
       <div class="playlist-item-actions">
-        <button class="mini-button${isPlaying ? " is-accent" : ""}" data-playlist-action="play" data-index="${index}">${isPlaying ? "重播" : "播放"}</button>
+        <button class="mini-button${isPlaying ? " is-accent" : ""}" data-playlist-action="play" data-eid="${esc(entry.eid)}">${isPlaying ? "重播" : "播放"}</button>
         <button class="mini-button" data-playlist-action="remove" data-eid="${esc(entry.eid)}" title="移出列表">移除</button>
       </div>
     </div>`;
   }).join("");
 
-  $("#playlist-play-all")?.addEventListener("click", () => playAllPlaylist());
+  $("#playlist-play-all")?.addEventListener("click", () => playAllPlaylist().catch((error) => notify(error.message)));
   $("#playlist-clear")?.addEventListener("click", () => clearPlaylist());
 
   // 原生拖拽排序
-  let dragIndex = null;
+  let dragEid = null;
   holder.addEventListener("dragstart", (event) => {
     const item = event.target.closest(".playlist-item");
     if (!item) return;
-    dragIndex = Number(item.dataset.index);
+    dragEid = item.dataset.eid;
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(dragIndex));
+    event.dataTransfer.setData("text/plain", dragEid);
     item.classList.add("is-dragging");
   });
   holder.addEventListener("dragover", (event) => {
@@ -1038,17 +1089,14 @@ async function renderPlaylistPage(root) {
     event.preventDefault();
     const item = event.target.closest(".playlist-item");
     $$(".playlist-item.is-drop-target", holder).forEach(el => el.classList.remove("is-drop-target"));
-    if (!item || dragIndex == null) return;
-    const toIndex = Number(item.dataset.index);
-    if (dragIndex !== toIndex) {
-      movePlaylistItem(dragIndex, toIndex);
-    }
-    dragIndex = null;
+    if (!item || !dragEid) return;
+    if (dragEid !== item.dataset.eid) movePlaylistItem(dragEid, item.dataset.eid);
+    dragEid = null;
   });
   holder.addEventListener("click", (event) => {
     const button = event.target.closest("[data-playlist-action]");
     if (!button) return;
-    if (button.dataset.playlistAction === "play") playPlaylistAt(Number(button.dataset.index));
+    if (button.dataset.playlistAction === "play") playPlaylistAt(button.dataset.eid, { restart: button.textContent === "重播" }).catch((error) => notify(error.message));
     if (button.dataset.playlistAction === "remove") removeFromPlaylist(button.dataset.eid);
   });
 }
@@ -1087,13 +1135,17 @@ function renderSubscriptionCards(holder, items) {
 
 async function loadSubscriptions() {
   const holder = $("#subscriptions-list");
+  if (!holder) return;
   try {
-    state.subscriptions = await fetchAllSubscriptions();
+    const subscriptions = await fetchAllSubscriptions();
+    if ($("#subscriptions-list") !== holder) return;
+    state.subscriptions = subscriptions;
     state.subscriptions.forEach((item) => state.subscribedPids.add(podcastIdOf(item)));
     renderSubscriptionCards(holder, state.subscriptions);
     const counter = $("#subscriptions-count");
     if (counter) counter.textContent = `${state.subscriptions.length} 个节目`;
   } catch (error) {
+    if ($("#subscriptions-list") !== holder) return;
     holder.innerHTML = `<div class="empty">${esc(error.message)}<br /><button class="mini-button" data-action="login">去登录</button></div>`;
     holder.querySelector("[data-action=login]")?.addEventListener("click", openLogin);
   }
@@ -1161,17 +1213,18 @@ const MIN_PLAY_PROGRESS_SECONDS = 5;
 // 进度上报（playback-progress/update）只写进度，不产生收听历史记录
 async function markEpisodePlayed(item) {
   const eid = episodeIdOf(item);
-  if (!eid || !state.auth?.accessToken) return;
-  const pid = podcastIdOf(item);
-  // 同一集短时间内不重复上报
-  const now = Date.now();
-  const last = state.lastPlayedMark?.get(eid) || 0;
-  if (now - last < 30_000) return;
-  if (!state.lastPlayedMark) state.lastPlayedMark = new Map();
-  state.lastPlayedMark.set(eid, now);
-  api("/played_create", { eid, pid }).catch(() => {
-    // 上报失败不影响播放
-  });
+  if (!eid || !state.auth?.accessToken || state.playedMarkPending.has(eid)) return;
+  const last = state.lastPlayedMark.get(eid);
+  if (last != null && Date.now() - last < 30_000) return;
+  state.playedMarkPending.add(eid);
+  try {
+    await api("/played_create", { eid, pid: podcastIdOf(item) });
+    state.lastPlayedMark.set(eid, Date.now());
+  } catch {
+    // A failed report can be retried on the next successful playback.
+  } finally {
+    state.playedMarkPending.delete(eid);
+  }
 }
 
 // 本地播放列表：存在扩展本地存储，支持添加单集、排序、顺序播放
@@ -1191,137 +1244,112 @@ function updatePlaylistBadges(count) {
   }
 }
 
-async function loadPlaylist() {
-  try {
-    const { [PLAYLIST_KEY]: raw = [] } = await chrome.storage.local.get(PLAYLIST_KEY);
-    const valid = (Array.isArray(raw) ? raw : []).filter((item) => item && typeof item === "object" && episodeIdOf(item));
-    state.playlist = valid;
-    updatePlaylistBadges(valid.length);
-    return valid;
-  } catch {
-    return [];
+function syncPlaylist(list) {
+  const previous = state.playlist;
+  const currentEid = episodeIdOf(state.current);
+  const index = list.findIndex((entry) => entry.eid === currentEid);
+  if (index >= 0) {
+    state.playlistNextEid = undefined;
+  } else {
+    const oldCurrent = previous.findIndex((entry) => entry.eid === currentEid);
+    const oldNext = previous.findIndex((entry) => entry.eid === state.playlistNextEid);
+    const removed = oldCurrent >= 0 ? oldCurrent
+      : oldNext >= 0 && !list.some((entry) => entry.eid === state.playlistNextEid) ? oldNext : -1;
+    if (removed >= 0) {
+      state.playlistNextEid = previous.slice(removed + 1)
+        .find((entry) => list.some((candidate) => candidate.eid === entry.eid))?.eid ?? null;
+    }
+    if (!list.length) state.playlistNextEid = null;
+    else if (!previous.length) state.playlistNextEid = undefined;
   }
+  state.playlistIndex = index >= 0 ? index : null;
+  state.playlist = list;
+  updatePlaylistBadges(list.length);
+  return list;
 }
 
-async function savePlaylist(list) {
-  const valid = Array.isArray(list) ? list : [];
-  await chrome.storage.local.set({ [PLAYLIST_KEY]: valid });
-  state.playlist = valid;
-  updatePlaylistBadges(valid.length);
+async function loadPlaylist() {
+  return syncPlaylist(await send("get-playlist"));
+}
+
+async function mutatePlaylist(payload) {
+  const list = await send("update-playlist", { payload });
+  syncPlaylist(list);
+  if (state.route === "playlist" && !state.episodeView && !state.podcastView) renderRoute();
+  return list;
 }
 
 async function addToPlaylist(item, { playNext = false, notifyUser = true } = {}) {
-  const eid = episodeIdOf(item);
-  const pid = podcastIdOf(item);
-  if (!eid || !pid) return notify("无法识别这个单集");
-  const list = await loadPlaylist();
-  const existingIndex = list.findIndex((entry) => episodeIdOf(entry) === eid);
-
-  const entry = {
-    eid,
-    pid,
-    title: titleOf(item),
-    podcastTitle: item?.podcast?.title || item?.podcast?.name || "",
-    duration: durationOf(item) || 0,
-    image: imageOf(item) || "",
-    addedAt: new Date().toISOString()
-  };
-
-  if (existingIndex >= 0) {
-    if (playNext) {
-      list.splice(existingIndex, 1);
-      const currentEid = episodeIdOf(state.current);
-      const curIdx = currentEid ? list.findIndex((e) => episodeIdOf(e) === currentEid) : -1;
-      const targetIdx = curIdx >= 0 ? curIdx + 1 : 0;
-      list.splice(targetIdx, 0, entry);
-      await savePlaylist(list);
-      if (notifyUser) notify("已移至下一首播放");
-    } else {
-      if (notifyUser) notify("已在播放列表中");
-    }
-  } else {
-    if (playNext) {
-      const currentEid = episodeIdOf(state.current);
-      const curIdx = currentEid ? list.findIndex((e) => episodeIdOf(e) === currentEid) : -1;
-      const targetIdx = curIdx >= 0 ? curIdx + 1 : 0;
-      list.splice(targetIdx, 0, entry);
-      await savePlaylist(list);
-      if (notifyUser) notify("已设为下一首播放");
-    } else {
-      list.push(entry);
-      await savePlaylist(list);
-      if (notifyUser) notify(`已加入播放列表（共 ${list.length} 集）`);
-    }
-  }
-  if (state.route === "playlist") renderRoute();
+  try {
+    // A podcast action explicitly selects its latest episode; never store a podcast as an episode.
+    if (!episodeIdOf(item) || !podcastIdOf(item)) item = await resolveEpisode(item);
+    const eid = episodeIdOf(item);
+    const pid = podcastIdOf(item);
+    if (!eid || !pid) return notify("无法识别这个单集");
+    const existed = state.playlist.some((entry) => entry.eid === eid);
+    const list = await mutatePlaylist({
+      action: "add", playNext, currentEid: episodeIdOf(state.current),
+      entry: {
+        eid, pid, title: titleOf(item),
+        podcastTitle: item?.podcast?.title || item?.podcast?.name || "",
+        duration: durationOf(item), image: imageOf(item), addedAt: new Date().toISOString()
+      }
+    });
+    if (notifyUser) notify(playNext ? "已设为下一首播放" : existed ? "已在播放列表中" : "已加入播放列表（共 " + list.length + " 集）");
+    return list;
+  } catch (error) { notify(error.message); }
 }
 
 async function removeFromPlaylist(eid) {
-  const list = (await loadPlaylist()).filter((entry) => episodeIdOf(entry) !== eid);
-  await savePlaylist(list);
-  notify("已从播放列表移除");
-  if (state.route === "playlist") renderRoute();
+  try {
+    await mutatePlaylist({ action: "remove", eid });
+    notify("已从播放列表移除");
+  } catch (error) { notify(error.message); }
 }
 
 async function clearPlaylist() {
-  await savePlaylist([]);
-  notify("已清空播放列表");
-  if (state.route === "playlist") renderRoute();
+  try {
+    await mutatePlaylist({ action: "clear" });
+    state.playlistNextEid = null;
+    notify("已清空播放列表");
+  } catch (error) { notify(error.message); }
 }
 
-async function movePlaylistItem(fromIndex, toIndex) {
-  const list = await loadPlaylist();
-  if (fromIndex < 0 || fromIndex >= list.length) return;
-  if (toIndex < 0 || toIndex >= list.length) return;
-  const [moved] = list.splice(fromIndex, 1);
-  list.splice(toIndex, 0, moved);
-  await savePlaylist(list);
-  notify("播放顺序已调整");
-  if (state.route === "playlist") renderRoute();
+async function movePlaylistItem(eid, beforeEid) {
+  try {
+    await mutatePlaylist({ action: "move", eid, beforeEid });
+    notify("播放顺序已调整");
+  } catch (error) { notify(error.message); }
 }
 
-async function playPlaylistAt(index) {
+async function playPlaylistAt(target, { restart = false } = {}) {
+  const intent = ++openEpisodeSeq;
   const list = await loadPlaylist();
-  const entry = list[index];
+  if (intent !== openEpisodeSeq) return;
+  const entry = typeof target === "string" ? list.find((item) => item.eid === target) : list[target];
   if (!entry) return notify("选中的单集不在列表中");
-  const item = {
-    type: "EPISODE",
-    eid: entry.eid,
-    pid: entry.pid,
-    title: entry.title,
-    podcast: { pid: entry.pid, title: entry.podcastTitle },
-    duration: entry.duration,
-    image: { picUrl: entry.image },
-    media: { source: { url: "" } }
-  };
-  state.playlistIndex = index;
-  await openEpisode(item);
+  await openEpisode({
+    ...entry, type: "EPISODE", podcast: { pid: entry.pid, title: entry.podcastTitle },
+    image: { picUrl: entry.image }
+  }, { restart });
 }
 
 async function playAllPlaylist() {
-  const list = await loadPlaylist();
-  if (!list.length) return notify("播放列表为空");
-  await playPlaylistAt(0);
+  await playPlaylistAt(0, { restart: true });
 }
 
 async function playNextInPlaylist() {
-  const list = await loadPlaylist();
-  if (!list.length) return;
-  let next = 0;
+  const intent = openEpisodeSeq;
   const curEid = episodeIdOf(state.current);
-  if (curEid) {
-    const idx = list.findIndex(e => episodeIdOf(e) === curEid);
-    next = idx >= 0 ? idx + 1 : 0;
-  } else if (state.playlistIndex != null) {
-    next = state.playlistIndex + 1;
-  }
-  if (next >= list.length) {
-    state.playlistIndex = null;
-    return notify("播放列表已全部播完");
-  }
-  const nextEntry = list[next];
-  notify(`正在自动连播下一首：${nextEntry.title}`);
-  await playPlaylistAt(next);
+  const list = await loadPlaylist();
+  if (intent !== openEpisodeSeq || !list.length) return;
+  const index = list.findIndex((entry) => entry.eid === curEid);
+  const next = index >= 0 ? list[index + 1]
+    : state.playlistNextEid === undefined ? list[0]
+      : list.find((entry) => entry.eid === state.playlistNextEid);
+  if (!next) return notify("播放列表已全部播完");
+  notify("正在自动连播下一首：" + next.title);
+  await playPlaylistAt(next.eid);
 }
 
 function progressListOf(response) {
@@ -1385,24 +1413,38 @@ async function resumePlaybackPosition(episode, player) {
   if (!eid || !state.auth?.accessToken) return null;
   const progress = await fetchPlaybackProgress(eid);
   const record = progress.get(eid);
-  if (!record) return null;
-  const duration = Number(player.duration);
-  const target = Number(record.seconds);
-  // 若上次已经播完（距结尾不足 60 秒）则从头播，不要停在片尾
-  if (Number.isFinite(duration) && duration > 0 && target >= duration - 60) return null;
-  if (!target || target < MIN_PLAY_PROGRESS_SECONDS) return null;
-  return target;
+  const target = Number(record?.seconds);
+  return Number.isFinite(target) && target >= MIN_PLAY_PROGRESS_SECONDS ? target : null;
 }
 
-function seekToTimestamp(seconds, { scroll = false } = {}) {
+function cancelPendingPosition() {
+  state.positionVersion += 1;
+  state.pendingPosition = null;
+}
+
+function applyPendingPosition() {
+  const pending = state.pendingPosition;
   const audio = $("#audio");
-  if (!audio.src) return notify("当前没有可跳转的播放内容");
-  const target = Math.max(0, Number(seconds) || 0);
-  audio.currentTime = Math.min(target, audio.duration || target);
-  audio.play().catch(() => notify("已定位时间点，请点击播放继续"));
-  updateActiveProgressAnchor(target);
-  if (scroll) {
-    document.querySelector(`[data-content-timestamp="${Math.floor(target)}"]`)
+  if (!pending || pending.seq !== openEpisodeSeq || pending.eid !== episodeIdOf(state.current)) return;
+  const duration = Number(audio.duration);
+  if (audio.readyState < 1 || !Number.isFinite(duration) || duration <= 0) return;
+  // Apply the same end-of-episode rule whichever arrives first: progress or metadata.
+  const target = pending.resume && pending.seconds >= duration - 60
+    ? 0 : Math.min(pending.seconds, Math.max(0, duration - 0.01));
+  audio.currentTime = target;
+  state.pendingPosition = null;
+  if (pending.resume && target > 0) notify("已从 " + formatTime(target) + " 继续播放");
+}
+
+async function seekToTimestamp(seconds, { episode = state.current, scroll = false } = {}) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0 || !episodeIdOf(episode)) return;
+  // The caller owns the timestamp. Never infer its episode from the visible detail page.
+  const result = await openEpisode(episode, { startAt: value, showDetail: false });
+  if (!result || result.seq !== openEpisodeSeq) return;
+  updateActiveProgressAnchor($("#audio").currentTime);
+  if (scroll && isCurrentEpisode(state.episodeView?.episode)) {
+    document.querySelector('[data-content-timestamp="' + Math.floor(value) + '"]')
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 }
@@ -1443,6 +1485,12 @@ function renderEpisodeContentBlocks(episode) {
   return output.join("");
 }
 
+// 当前播放器里的单集是否与详情页展示的是同一集
+function isCurrentEpisode(item) {
+  const eid = episodeIdOf(item);
+  return Boolean(eid && eid === episodeIdOf(state.current));
+}
+
 function renderEpisodePage(root) {
   const episode = state.episodeView.episode;
   const image = imageOf(episode);
@@ -1457,7 +1505,7 @@ function renderEpisodePage(root) {
       <header class="episode-content-hero">
         <div class="episode-content-cover">${image ? `<img src="${esc(image)}" alt="${esc(titleOf(episode))}" />` : "<span>◌</span>"}</div>
         <div class="episode-content-heading">
-          <div class="route-eyebrow">NOW PLAYING · SHOW NOTES</div>
+          <div class="route-eyebrow">EPISODE · SHOW NOTES</div>
           <h1>${esc(titleOf(episode))}</h1>
           <button class="episode-podcast-link" type="button" data-open-current-podcast>${esc(podcastTitle)}</button>
           <div class="episode-facts">
@@ -1466,7 +1514,7 @@ function renderEpisodePage(root) {
             ${sourceUrl ? `<a href="${esc(sourceUrl)}" target="_blank" rel="noreferrer">真实单集链接 ↗</a>` : ""}
           </div>
           <div class="episode-content-actions">
-            <button class="primary-button" type="button" data-toggle-current-play>${$("#audio").paused ? "播放" : "暂停"}</button>
+            <button class="primary-button" type="button" data-toggle-current-play>${isCurrentEpisode(episode) ? ($("#audio").paused ? "播放" : "暂停") : "播放此单集"}</button>
             <button class="secondary-button" type="button" data-copy-current-link>复制单集链接</button>
           </div>
         </div>
@@ -1479,11 +1527,15 @@ function renderEpisodePage(root) {
         <div class="episode-content-body">${renderEpisodeContentBlocks(episode)}</div>
       </section>
     </article>`;
-  $$("[data-seek-seconds]", root).forEach((button) => button.addEventListener("click", () => seekToTimestamp(button.dataset.seekSeconds)));
+  $$("[data-seek-seconds]", root).forEach((button) => button.addEventListener("click", () => seekToTimestamp(button.dataset.seekSeconds, { episode })));
   $("[data-open-current-podcast]", root)?.addEventListener("click", () => openPodcast(episode));
-  $("[data-toggle-current-play]", root)?.addEventListener("click", (event) => {
+  $("[data-toggle-current-play]", root)?.addEventListener("click", () => {
     const audio = $("#audio");
-    if (audio.paused) audio.play().catch(() => notify("播放失败，请稍后重试"));
+    if (!isCurrentEpisode(episode)) {
+      openEpisode(episode).catch((error) => notify(error.message));
+      return;
+    }
+    if (audio.paused) openEpisode(episode, { showDetail: false });
     else audio.pause();
   });
   $("[data-copy-current-link]", root)?.addEventListener("click", () => copyEpisodeLink(episode));
@@ -1528,7 +1580,7 @@ async function loadPodcastPopularEpisodes(view) {
   if (!pid) return;
   try {
     const response = await api("/episode_popular", { pid, label: "POPULAR" });
-    if (state.podcastView !== view) return;
+    if (state.podcastView !== view || $("#podcast-popular-container") !== container) return;
     const popular = extractContent(response).filter((item) => episodeIdOf(item));
     if (!popular.length) {
       container.innerHTML = "";
@@ -1548,7 +1600,7 @@ async function loadPodcastPopularEpisodes(view) {
     if (listHolder) bindPodcastEpisodeRows(listHolder, popular.slice(0, 5));
   } catch {
     // 热门单集拉取失败时静默降级，不阻碍主列表展示
-    if (container) container.innerHTML = "";
+    if (state.podcastView === view && $("#podcast-popular-container") === container) container.innerHTML = "";
   }
 }
 
@@ -1558,7 +1610,16 @@ async function loadPodcastEpisodes(view) {
   try {
     const response = await api("/episode_list", { pid: podcastIdOf(view.podcast), order: "desc" });
     if (state.podcastView !== view) return;
-    view.episodes = extractContent(response).filter((item) => episodeIdOf(item));
+    const episodes = extractContent(response).filter((item) => episodeIdOf(item));
+    view.episodes = episodes;
+    // 把列表里所有单集的播放进度缓存下来，方便 render 时显示“上次听到”
+    try {
+      const progress = await fetchPlaybackProgress(episodes.map((e) => episodeIdOf(e)));
+      if (progress && progress.size) {
+        view.episodeProgress = progress;
+      }
+    } catch { /* 进度读取失败不影响列表渲染 */ }
+    if (state.podcastView !== view || $("#podcast-episodes") !== holder) return;
     renderPodcastEpisodes(holder, view.episodes);
   } catch (error) {
     if (state.podcastView !== view) return;
@@ -1571,24 +1632,32 @@ async function loadPodcastEpisodes(view) {
 }
 
 function renderPodcastEpisodes(holder, episodes) {
+  if (!holder) return;
+  const progress = state.podcastView?.episodeProgress || new Map();
   holder.innerHTML = episodes.length
-    ? episodes.map((episode, index) => podcastEpisodeRow(episode, index)).join("")
+    ? episodes.map((episode, index) => podcastEpisodeRow(episode, index, progress)).join("")
     : `<div class="empty">这个节目暂时没有可展示的单集。</div>`;
   bindPodcastEpisodeRows(holder, episodes);
 }
 
-function podcastEpisodeRow(episode, index) {
+function podcastEpisodeRow(episode, index, progress = new Map()) {
   const published = episode?.pubDate || episode?.publishedAt || episode?.createdAt || "";
   const publishedText = published ? new Date(published).toLocaleDateString("zh-CN") : "节目单集";
   const secondaryActions = [
     `<button data-episode-action="download" role="menuitem">下载音频</button>`,
     `<button data-episode-action="transcribe" role="menuitem">${transcriptActionLabel()}</button>`,
+    `<button data-episode-action="play-next" role="menuitem">下一首播放</button>`,
+    `<button data-episode-action="add-playlist" role="menuitem">加入播放列表</button>`,
     `<button data-episode-action="copy-episode" role="menuitem">复制单集链接</button>`,
     `<button data-episode-action="copy-podcast" role="menuitem">复制节目链接</button>`
   ].join("");
+  const record = progress.get(episodeIdOf(episode));
+  const progressText = record && Number(record.seconds) > 0
+    ? `上次听到 ${formatTime(record.seconds)}`
+    : "";
   return `<article class="episode-row podcast-episode-row" data-index="${index}">
     <div class="episode-thumb">${imageOf(episode) ? `<img src="${esc(imageOf(episode))}" alt="" />` : ""}</div>
-    <div class="episode-meta"><strong>${esc(titleOf(episode))}</strong><span>${esc(publishedText)}</span></div>
+    <div class="episode-meta"><strong>${esc(titleOf(episode))}</strong><span>${esc(publishedText)}${progressText ? " · " + esc(progressText) : ""}</span></div>
     <div class="row-actions">
       <button class="row-action" data-episode-action="play">播放</button>
       <button class="row-action" data-episode-action="view-podcast">查看节目</button>
@@ -1600,9 +1669,12 @@ function podcastEpisodeRow(episode, index) {
 
 function bindPodcastEpisodeRows(holder, episodes) {
   $$(".podcast-episode-row", holder).forEach((row) => row.addEventListener("click", (event) => {
-    const episode = episodes[Number(row.dataset.index)];
+    const index = Number(row.dataset.index);
+    const episode = Number.isInteger(index) && index >= 0 ? episodes?.[index] : null;
+    if (!episode) return;
     const control = event.target.closest("button, summary");
-    if (!control) return openEpisode(episode);
+    // 点空白处只是查看详情，不要打断正在播放的内容
+    if (!control) return showEpisodeDetail(episode);
     if (control.tagName === "SUMMARY") return;
     const action = control.dataset.episodeAction;
     closeActionMenu(control);
@@ -1610,12 +1682,12 @@ function bindPodcastEpisodeRows(holder, episodes) {
     if (action === "view-podcast") openPodcast(episode);
     if (action === "summarize") summarizeEpisode(episode, control).catch((error) => notify(error.message));
     if (action === "copy-episode") copyEpisodeLink(episode);
-      if (action === "add-playlist") addToPlaylist(episode);
     if (action === "copy-podcast") copyPodcastLink(episode);
+    if (action === "favorite") toggleFavorite(episode);
+    if (action === "add-playlist") addToPlaylist(episode);
+    if (action === "play-next") addToPlaylist(episode, { playNext: true });
     if (action === "download") downloadEpisodeAudio(episode);
     if (action === "transcribe") exportEpisodeTranscript(episode, control);
-      if (action === "add-playlist") addToPlaylist(episode);
-      if (action === "play-next") addToPlaylist(episode, { playNext: true });
   }));
 }
 
@@ -1750,14 +1822,14 @@ function renderSettingsPage(root) {
               <button id="activate-summary-prompt" class="mini-button" type="button">设为当前</button>
               <button id="delete-summary-prompt" class="mini-button is-danger" type="button">删除版本</button>
             </div>
-            <p class="field-hint">内置版本只读；自定义版本保存在 Chrome 本地存储。支持占位符 <code>{{title}}</code>。</p>
+            <p class="field-hint">内置版本只读；自定义版本保存在本地存储。支持占位符 <code>{{title}}</code>。</p>
           </div>
         </section>
         <section class="settings-section settings-panel" data-settings-panel="advanced" ${panelHidden("advanced")}>
           <div class="settings-section-heading"><div><h3>高级设置</h3></div><p>请求路由与代理配置。</p></div>
           <label>请求模式<select id="api-mode"><option value="direct">扩展直连（本地开发）</option><option value="proxy">受控代理（生产推荐）</option></select></label>
           <label>代理地址<input id="proxy-url" type="url" value="${esc(settings.proxyBaseUrl || "")}" placeholder="https://your-proxy.example.com" /></label>
-          <p class="field-hint">请勿将代理地址指向不可信服务。</p>
+          <p class="field-hint">仅支持标准端口的 HTTPS 代理。保存时会单独申请该站点权限；小宇宙请求及登录令牌将发送到你选择的代理，请仅授权可信服务。</p>
         </section>
         <button class="primary-button settings-save" type="submit">保存设置</button>
       </form>
@@ -1773,6 +1845,8 @@ function renderSettingsPage(root) {
       panel.hidden = panel.dataset.settingsPanel !== state.settingsTab;
     });
   }));
+  const settingsForm = $("#settings-form");
+  const settingsActive = () => $("#settings-form") === settingsForm;
   $("#api-mode").value = settings.apiMode || "direct";
   $("#transcript-source").value = settings.transcriptSource || "official";
   $("#asr-provider").value = settings.asrProvider || "qwen";
@@ -1837,6 +1911,7 @@ function renderSettingsPage(root) {
       };
       const prompt = prompts[button.dataset.chooseDirectory] || "请选择保存目录";
       const data = await send("choose-native-directory", { prompt });
+      if (!settingsActive()) return;
       $(`#${button.dataset.chooseDirectory}`).value = data.path;
       updatePreview();
     } catch (error) {
@@ -1871,7 +1946,7 @@ function renderSettingsPage(root) {
       const status = await send("save-summary-credentials", {
         clearKeys: [button.dataset.clearSummaryKey]
       });
-      renderSummaryProviderStatus(status.summaryConfigured || {});
+      if (settingsActive()) renderSummaryProviderStatus(status.summaryConfigured || {});
       notify("API Key 已从 Keychain 删除");
     } catch (error) {
       notify(error.message);
@@ -1883,9 +1958,10 @@ function renderSettingsPage(root) {
       button.disabled = true;
       button.textContent = "选择中…";
       const selected = await send("import-summary-transcript");
+      if (!settingsActive()) return;
       await summarizeTranscriptPath(selected.path, button, $("#summary-action-status"));
     } catch (error) {
-      $("#summary-action-status").textContent = error.message;
+      if (settingsActive()) $("#summary-action-status").textContent = error.message;
       notify(error.message);
     } finally {
       button.disabled = false;
@@ -1894,6 +1970,7 @@ function renderSettingsPage(root) {
   });
   $("#settings-form").addEventListener("submit", saveSettings);
   send("get-native-host-status").then((status) => {
+    if (!settingsActive()) return;
     nativeStatus = status;
     const node = $("#native-host-status");
     if (!node) return;
@@ -1939,7 +2016,7 @@ function renderSettingsPage(root) {
     providerNode.textContent = `本地 Qwen：${status.localQwen?.available ? "已安装" : "未安装"} · Qwen API：${status.qwenConfigured ? "已配置" : "未配置"} · 豆包 API：${status.doubaoConfigured ? "已配置" : "未配置"}`;
     renderLocalQwenStatus();
     renderSummaryProviderStatus(status.summaryConfigured || {});
-  });
+  }).catch((error) => { if (settingsActive()) notify(error.message); });
 }
 
 function renderSummaryProviderStatus(configured = {}) {
@@ -2075,7 +2152,7 @@ function renderPlayerAnchors(item = null) {
     }).join("")
     : "";
   $$("[data-progress-seconds]", holder).forEach((button) => {
-    button.addEventListener("click", () => seekToTimestamp(button.dataset.progressSeconds, { scroll: true }));
+    button.addEventListener("click", () => seekToTimestamp(button.dataset.progressSeconds, { episode: item, scroll: true }));
   });
   updateActiveProgressAnchor($("#audio")?.currentTime || 0);
 }
@@ -2233,7 +2310,7 @@ async function exportOfficialEpisodeTranscript(item, button = null, { propagate 
   }
 }
 
-async function transcribeEpisodeAudio(item, button = null, { propagate = false } = {}) {
+async function transcribeEpisodeAudio(item, button = null, { propagate = false, consentScope = "" } = {}) {
   const originalText = button?.textContent;
   try {
     const episode = await resolveEpisode(item);
@@ -2257,6 +2334,7 @@ async function transcribeEpisodeAudio(item, button = null, { propagate = false }
         filename,
         baseName: filename.replace(/\.[^.]+$/, ""),
         language: "zh",
+        consentScope,
         episodeId: episodeIdOf(episode),
         episodeUrl: episodeLinkOf(episode),
         timeline: transcriptTimelineOf(episode)
@@ -2301,27 +2379,35 @@ function asrProviderLabel(providerId = state.settings?.asrProvider) {
 }
 
 function ensureSummaryConsent() {
-  if (state.settings?.summaryConsentAccepted) return Promise.resolve(true);
+  if (hasSummaryConsent(state.settings)) return Promise.resolve(true);
+  if (ensureSummaryConsent.pending) return ensureSummaryConsent.pending;
   const dialog = $("#summary-consent-dialog");
-  $("#summary-consent-provider").textContent = summaryProviderLabel();
-  $("#summary-consent-asr").textContent = transcriptSourceLabel();
+  const scope = summaryConsentScope(state.settings);
+  const providerConfig = state.settings?.summaryProviders?.[state.settings.summaryProvider];
+  $("#summary-consent-provider").textContent = summaryProviderLabel() + " · " + (providerConfig?.endpoint || "未配置地址");
+  const asrEndpoint = state.settings?.asrProvider === "qwen" ? state.settings.qwenAsrEndpoint
+    : state.settings?.asrProvider === "doubao" ? state.settings.doubaoAsrEndpoint : "";
+  $("#summary-consent-asr").textContent = transcriptSourceLabel()
+    + (state.settings?.transcriptSource === "asr" && asrEndpoint ? " · " + asrEndpoint : "");
   $("#summary-consent-comments").textContent = state.settings?.summaryIncludeComments
     ? "筛选后的公开评论也会一并发送。"
     : "评论不会被读取或发送。";
-  return new Promise((resolve) => {
+  const pending = new Promise((resolve) => {
     let settled = false;
+    const onClose = () => finish(false);
     const finish = (value) => {
       if (settled) return;
       settled = true;
+      dialog.removeEventListener("close", onClose);
       resolve(value);
     };
-    dialog.addEventListener("close", () => finish(false), { once: true });
+    dialog.addEventListener("close", onClose, { once: true });
     $("#summary-consent-confirm").onclick = async () => {
       try {
         state.settings = await send("update-settings", {
-          settings: { summaryConsentAccepted: true }
+          settings: { summaryConsentAccepted: true, summaryConsentScope: scope }
         });
-        finish(true);
+        finish(hasSummaryConsent(state.settings) && summaryConsentScope(state.settings) === scope);
         dialog.close();
       } catch (error) {
         notify(error.message);
@@ -2329,6 +2415,8 @@ function ensureSummaryConsent() {
     };
     dialog.showModal();
   });
+  ensureSummaryConsent.pending = pending.finally(() => { ensureSummaryConsent.pending = null; });
+  return ensureSummaryConsent.pending;
 }
 
 function ensureResummarize(episode) {
@@ -2359,10 +2447,11 @@ async function summarizeTranscriptPath(
   transcriptPath,
   button = null,
   statusNode = null,
-  { skipConsent = false, episodeId = "" } = {}
+  { skipConsent = false, episodeId = "", consentScope = "" } = {}
 ) {
   if (!transcriptPath) throw new Error("请先生成或选择 Markdown 转写稿");
-  if (!skipConsent && !await ensureSummaryConsent()) return null;
+  if ((!skipConsent || !hasSummaryConsent(state.settings)) && !await ensureSummaryConsent()) return null;
+  if (consentScope && consentScope !== summaryConsentScope(state.settings)) throw new Error("AI 配置已变化，请重新发起总结");
   const originalText = button?.textContent;
   try {
     if (button) {
@@ -2372,7 +2461,7 @@ async function summarizeTranscriptPath(
     if (statusNode) statusNode.textContent = `${summaryProviderLabel()} 正在总结，请保持窗口打开`;
     setTranscriptionStatus(`${summaryProviderLabel()} AI 正在总结，请保持窗口打开`);
     const result = await send("summarize-transcript", {
-      payload: { transcriptPath, episodeId }
+      payload: { transcriptPath, episodeId, consentScope: consentScope || summaryConsentScope(state.settings) }
     });
     const summaryPath = result.markdown;
     if (!summaryPath) throw new Error("AI 总结完成但未返回 Markdown 路径");
@@ -2416,91 +2505,127 @@ async function summarizeEpisode(item, button = null) {
   if (!eid) throw new Error("无法识别需要总结的单集");
   if (!await ensureResummarize(episode)) return null;
   if (!await ensureSummaryConsent()) return null;
+  const consentScope = summaryConsentScope(state.settings);
   const hasMatchingTranscript = (
     state.currentTranscriptPath
     && state.currentTranscriptEpisodeId === eid
   );
   const transcriptPath = hasMatchingTranscript
     ? state.currentTranscriptPath
-    : await exportEpisodeTranscript(episode, button, { propagate: true });
+    : await exportEpisodeTranscript(episode, button, { propagate: true, consentScope });
   return summarizeTranscriptPath(
     transcriptPath,
     button,
     null,
-    { skipConsent: true, episodeId: eid }
+    { skipConsent: true, episodeId: eid, consentScope }
   );
 }
 
-async function openEpisode(item) {
+// 只查看详情：绝不修改当前播放内容，也不触发自动播放或播放上报
+function showEpisodeDetail(item) {
+  if (!episodeIdOf(item)) return;
+  const view = { episode: item, scrollY: window.scrollY };
+  state.episodeView = view;
+  $("#route-eyebrow").textContent = "SHOW NOTES";
+  $("#route-title").textContent = titleOf(item);
+  $("#back-button").hidden = false;
+  renderRoute();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  return resolveEpisode(item).then((episode) => {
+    if (state.episodeView !== view || !episode) return;
+    view.episode = episode;
+    $("#route-title").textContent = titleOf(episode);
+    renderRoute();
+  }).catch((error) => {
+    if (state.episodeView === view) notify(error.message);
+  });
+}
+
+// Only explicit playback actions can select an audio source.
+async function openEpisode(item, { startAt = null, restart = false, showDetail = true } = {}) {
+  const mySeq = ++openEpisodeSeq;
+  const viewSeq = state.viewSeq;
+  cancelPendingPosition();
   try {
     const episode = await resolveEpisode(item);
-    if (!episode) return;
-    // 同一集已经在播放：打开详情页，不要重新播放
-    if (episodeIdOf(episode) && episodeIdOf(state.current) === episodeIdOf(episode)) {
-      if (!state.episodeView) {
-        state.episodeView = { episode, scrollY: window.scrollY };
-        renderRoute();
-      }
-      return;
-    }
-    const audio = audioOf(episode);
-    if (!audio) return notify("这集暂时没有可播放的音频地址");
-    state.current = episode;
-    if (state.currentTranscriptEpisodeId !== episodeIdOf(episode)) {
-      state.currentTranscriptPath = "";
-      state.currentTranscriptEpisodeId = "";
-      state.currentTranscriptSegments = [];
-    }
-    state.currentSummaryPath = summaryRecordOf(episode)?.markdown || "";
-    setTranscriptionStatus();
-    updatePlayerLinkButtons(episode);
+    if (mySeq !== openEpisodeSeq || !episode) return;
     const player = $("#audio");
-    player.src = audio;
-    // 记录当前会话的续播位置，等 loadedmetadata 后恢复
-    state.pendingResume = null;
-    resumePlaybackPosition(episode, player).then((seconds) => {
-      if (seconds == null) return;
-      // 只有当前仍是这一集才恢复，避免用户切走后又被拉回
-      if (episodeIdOf(state.current) !== episodeIdOf(episode)) return;
-      state.pendingResume = seconds;
-      const status = $("#transcription-status");
-      if (status) {
-        status.hidden = false;
-        status.textContent = `将从 ${formatTime(seconds)} 继续播放`;
+    const sameEpisode = episodeIdOf(episode) && episodeIdOf(state.current) === episodeIdOf(episode);
+    const audio = audioOf(episode);
+    if (!sameEpisode && !audio) return notify("这集暂时没有可播放的音频地址");
+    const explicitPosition = startAt != null || restart || (sameEpisode && player.ended);
+    if (!sameEpisode) {
+      // Flush A before assigning B so pause/timeupdate cannot report A's position as B.
+      player.pause();
+      flushProgressReport();
+      state.current = episode;
+      state.playlistNextEid = undefined;
+      if (state.currentTranscriptEpisodeId !== episodeIdOf(episode)) {
+        state.currentTranscriptPath = "";
+        state.currentTranscriptEpisodeId = "";
+        state.currentTranscriptSegments = [];
       }
-      if (player.readyState >= 1) {
-        player.currentTime = seconds;
-        state.pendingResume = null;
-      }
-    }).catch(() => {});
-    $("#player-title").textContent = titleOf(episode);
-    $("#player-title").onclick = () => {
-      if (state.current) openPodcast(state.current);
-    };
-    $("#player-title").title = "点击查看节目";
-    $("#player-title").style.cursor = "pointer";
-    $("#player-subtitle").textContent = episode?.podcast?.title || episode?.podcast?.name || "小宇宙单集";
-    const image = imageOf(episode);
-    $("#player-cover").innerHTML = image ? `<img src="${esc(image)}" alt="" />` : "<span>◌</span>";
-    $("#player-cover").onclick = () => {
-      if (state.current) openPodcast(state.current);
-    };
-    $("#player-cover").title = "点击查看节目";
-    $("#player-cover").style.cursor = "pointer";
-    state.episodeView = {
-      episode,
-      scrollY: window.scrollY
-    };
-    $("#route-eyebrow").textContent = "EPISODE NOTES";
-    $("#route-title").textContent = titleOf(episode);
-    $("#back-button").hidden = false;
-    renderPlayerAnchors(episode);
-    renderRoute();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    try { await player.play(); } catch { notify("浏览器阻止了自动播放，请点击播放按钮"); }
-    markEpisodePlayed(episode);
+      state.currentSummaryPath = summaryRecordOf(episode)?.markdown || "";
+      setTranscriptionStatus();
+      updatePlayerLinkButtons(episode);
+      player.src = audio;
+      $("#player-title").textContent = titleOf(episode);
+      $("#player-title").onclick = () => {
+        if (state.current) openPodcast(state.current);
+      };
+      $("#player-title").title = "点击查看节目";
+      $("#player-title").style.cursor = "pointer";
+      $("#player-title").setAttribute("role", "button");
+      $("#player-title").setAttribute("tabindex", "0");
+      $("#player-title").onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openPodcast(state.current);
+        }
+      };
+      $("#player-subtitle").textContent = episode?.podcast?.title || episode?.podcast?.name || "小宇宙单集";
+      const image = imageOf(episode);
+      $("#player-cover").innerHTML = image ? `<img src="${esc(image)}" alt="" />` : "<span>◌</span>";
+      $("#player-cover").onclick = () => {
+        if (state.current) openPodcast(state.current);
+      };
+      $("#player-cover").title = "点击查看节目";
+      $("#player-cover").style.cursor = "pointer";
+      $("#player-cover").setAttribute("role", "button");
+      $("#player-cover").setAttribute("tabindex", "0");
+      $("#player-cover").onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openPodcast(state.current);
+        }
+      };
+
+      renderPlayerAnchors(episode);
+    }
+    if (explicitPosition) {
+      state.pendingPosition = { seq: mySeq, eid: episodeIdOf(episode), seconds: Math.max(0, Number(startAt) || 0), resume: false };
+      applyPendingPosition();
+    } else if (!sameEpisode) {
+      const positionVersion = state.positionVersion;
+      resumePlaybackPosition(episode, player).then((seconds) => {
+        if (mySeq !== openEpisodeSeq || positionVersion !== state.positionVersion || seconds == null) return;
+        state.pendingPosition = { seq: mySeq, eid: episodeIdOf(episode), seconds, resume: true };
+        applyPendingPosition();
+      }).catch(() => {});
+    }
+    // Browsing another view while a request is in flight must not pull the reader back.
+    if (showDetail && state.viewSeq === viewSeq) showEpisodeDetail(episode);
+    try {
+      await player.play();
+      if (mySeq !== openEpisodeSeq) return;
+      markEpisodePlayed(episode);
+    } catch {
+      if (mySeq !== openEpisodeSeq) return;
+      notify("播放失败，请点击播放按钮重试");
+    }
+    return { episode, seq: mySeq };
   } catch (error) {
-    notify(error.message);
+    if (mySeq === openEpisodeSeq) notify(error.message);
   }
 }
 
@@ -2557,6 +2682,7 @@ function drawLoginQrcode(text) {
 
 function stopLoginPolling() {
   openLogin.session = null;
+  send("cancel-login-qrcode").catch(() => {});
   if (openLogin.timer) {
     clearTimeout(openLogin.timer);
     clearInterval(openLogin.timer);
@@ -2568,16 +2694,17 @@ async function startLoginQrcode() {
   const status = $("#login-qrcode-status");
   const errorNode = $("#login-error");
   stopLoginPolling();
+  const session = {};
+  openLogin.session = session;
   errorNode.textContent = "";
   status.className = "code-status is-pending";
   status.textContent = "正在生成二维码…";
   try {
     const { id, url } = await send("create-login-qrcode");
+    if (openLogin.session !== session) return;
     drawLoginQrcode(url);
     status.className = "code-status";
     status.textContent = "请用手机小宇宙 App 扫码，并在手机上确认登录";
-    const session = {};
-    openLogin.session = session;
     let ticks = 0;
     const fail = (message) => {
       stopLoginPolling();
@@ -2596,14 +2723,17 @@ async function startLoginQrcode() {
         const result = await send("poll-login-qrcode", { payload: { id } });
         if (openLogin.session !== session) return;
         switch (result?.status) {
-          case "authorized":
+          case "authorized": {
+            const auth = await send("get-auth");
+            if (openLogin.session !== session) return;
+            state.auth = auth;
             stopLoginPolling();
-            state.auth = await send("get-auth");
             $("#login-dialog").close();
             markConnection();
             renderRoute();
             notify("登录成功");
             return;
+          }
           case "scanned":
             status.className = "code-status is-pending";
             status.textContent = "已扫码，请在手机上确认登录";
@@ -2618,6 +2748,7 @@ async function startLoginQrcode() {
             break;
         }
       } catch (pollError) {
+        if (openLogin.session !== session) return;
         fail(pollError.message);
         return;
       }
@@ -2625,6 +2756,7 @@ async function startLoginQrcode() {
     };
     openLogin.timer = setTimeout(tick, 2000);
   } catch (error) {
+    if (openLogin.session !== session) return;
     status.className = "code-status is-error";
     status.textContent = error.message;
   }
@@ -2661,81 +2793,48 @@ async function confirmLogout() {
 
 async function saveSettings(event) {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
     syncSummaryPromptEditor();
     if (state.summaryPromptDrafts.some((prompt) => !String(prompt.content || "").trim())) {
       throw new Error("AI 总结 Prompt 内容不能为空");
     }
-    const asrCredentialStatus = await send("save-asr-credentials", {
-      credentials: {
-        qwenApiKey: $("#qwen-api-key").value.trim(),
-        doubaoApiKey: $("#doubao-api-key").value.trim()
-      }
-    });
-    const summaryCredentials = Object.fromEntries(SUMMARY_PROVIDERS.map((provider) => [
-      provider.keyField,
-      $(`#summary-${provider.id}-api-key`).value.trim()
-    ]));
-    const summaryCredentialStatus = await send("save-summary-credentials", {
-      credentials: summaryCredentials
-    });
-    const summaryProviders = Object.fromEntries(SUMMARY_PROVIDERS.map((provider) => [
-      provider.id,
-      {
-        endpoint: $(`#summary-${provider.id}-endpoint`).value.trim(),
-        model: $(`#summary-${provider.id}-model`).value.trim()
-      }
-    ]));
-    const includeComments = $("#summary-include-comments").checked;
-    const keepConsent = Boolean(
-      state.settings.summaryConsentAccepted
-      && (!includeComments || state.settings.summaryIncludeComments)
-    );
-    state.settings = await send("update-settings", {
-      settings: {
-        apiMode: $("#api-mode").value,
-        proxyBaseUrl: $("#proxy-url").value.trim(),
-        downloadFolder: "小宇宙音频",
-        transcriptFolder: "小宇宙转写稿",
-        audioDownloadPath: $("#audio-download-path").value.trim(),
-        transcriptDownloadPath: $("#transcript-download-path").value.trim(),
-        summaryDownloadPath: $("#summary-download-path").value.trim(),
-        downloadSaveAs: $("#download-save-as").checked,
-        transcriptSource: $("#transcript-source").value,
-        asrProvider: $("#asr-provider").value,
-        localQwenModel: $("#local-qwen-model").value,
-        qwenAsrEndpoint: $("#qwen-asr-endpoint").value.trim(),
-        qwenAsrModel: $("#qwen-asr-model").value.trim(),
-        doubaoAsrEndpoint: $("#doubao-asr-endpoint").value.trim(),
-        doubaoAsrResourceId: $("#doubao-asr-resource-id").value.trim(),
-        summaryProvider: $("#summary-provider").value,
-        summaryProviders,
-        summaryPromptVersions: state.summaryPromptDrafts.map((prompt) => ({ ...prompt })),
-        activeSummaryPromptId: state.settings.activeSummaryPromptId,
-        summaryConsentAccepted: keepConsent,
-        summaryIncludeComments: includeComments
-      }
-    });
-    $("#qwen-api-key").value = "";
-    $("#doubao-api-key").value = "";
-    SUMMARY_PROVIDERS.forEach((provider) => {
-      $(`#summary-${provider.id}-api-key`).value = "";
-    });
-    const providerNode = $("#asr-provider-status");
-    if (providerNode) {
-      providerNode.classList.toggle("is-ready", asrCredentialStatus.qwenConfigured || asrCredentialStatus.doubaoConfigured || asrCredentialStatus.localQwen?.available);
-      providerNode.textContent = `本地 Qwen：${asrCredentialStatus.localQwen?.available ? "已安装" : "未安装"} · Qwen API：${asrCredentialStatus.qwenConfigured ? "已配置" : "未配置"} · 豆包 API：${asrCredentialStatus.doubaoConfigured ? "已配置" : "未配置"}`;
+    // Snapshot the form before any await; navigation can replace its DOM at any time.
+    const fields = new Map($$("input, select", form).map((node) => [node.id, { value: node.value, checked: node.checked }]));
+    const value = (id) => String(fields.get(id)?.value || "").trim();
+    const checked = (id) => Boolean(fields.get(id)?.checked);
+    const summaryProviders = Object.fromEntries(SUMMARY_PROVIDERS.map(({ id }) => [id, {
+      endpoint: value("summary-" + id + "-endpoint"), model: value("summary-" + id + "-model")
+    }]));
+    const settings = {
+      apiMode: value("api-mode"), proxyBaseUrl: value("proxy-url"),
+      downloadFolder: "小宇宙音频", transcriptFolder: "小宇宙转写稿",
+      audioDownloadPath: value("audio-download-path"), transcriptDownloadPath: value("transcript-download-path"),
+      summaryDownloadPath: value("summary-download-path"), downloadSaveAs: checked("download-save-as"),
+      transcriptSource: value("transcript-source"), asrProvider: value("asr-provider"),
+      localQwenModel: value("local-qwen-model"), qwenAsrEndpoint: value("qwen-asr-endpoint"),
+      qwenAsrModel: value("qwen-asr-model"), doubaoAsrEndpoint: value("doubao-asr-endpoint"),
+      doubaoAsrResourceId: value("doubao-asr-resource-id"), summaryProvider: value("summary-provider"),
+      summaryProviders, summaryPromptVersions: state.summaryPromptDrafts.map((prompt) => ({ ...prompt })),
+      activeSummaryPromptId: state.settings.activeSummaryPromptId,
+      summaryConsentAccepted: state.settings.summaryConsentAccepted,
+      summaryConsentScope: state.settings.summaryConsentScope,
+      summaryIncludeComments: checked("summary-include-comments")
+    };
+    if (settings.apiMode === "proxy") {
+      const origin = proxyOrigin(settings.proxyBaseUrl);
+      // Call directly within the submit gesture. Only this one site is requested.
+      if (!await chrome.permissions.request({ origins: [origin] })) throw new Error("未授权代理站点，设置未保存");
     }
-    renderSummaryProviderStatus(summaryCredentialStatus.summaryConfigured || {});
-    $("#audio-download-path").value = state.settings.audioDownloadPath;
-    $("#transcript-download-path").value = state.settings.transcriptDownloadPath;
-    $("#summary-download-path").value = state.settings.summaryDownloadPath;
-    $("#audio-path-preview").textContent = state.settings.audioDownloadPath || "浏览器默认下载目录/小宇宙音频";
-    $("#transcript-path-preview").textContent = state.settings.transcriptDownloadPath || "浏览器默认下载目录/小宇宙转写稿";
-    $("#summary-path-preview").textContent = state.settings.summaryDownloadPath
-      || state.settings.transcriptDownloadPath
-      || "浏览器默认下载目录/小宇宙转写稿";
+    await send("save-asr-credentials", { credentials: {
+      qwenApiKey: value("qwen-api-key"), doubaoApiKey: value("doubao-api-key")
+    } });
+    await send("save-summary-credentials", { credentials: Object.fromEntries(SUMMARY_PROVIDERS.map(({ id, keyField }) => [
+      keyField, value("summary-" + id + "-api-key")
+    ])) });
+    state.settings = await send("update-settings", { settings });
     updatePlayerLinkButtons(state.current);
+    if ($("#settings-form") === form) renderRoute();
     notify("设置已保存");
   } catch (error) {
     notify(error.message);
@@ -2745,9 +2844,12 @@ async function saveSettings(event) {
 function initPlayer() {
   const audio = $("#audio");
   const closePlayerMenu = () => $("#player-more-menu").removeAttribute("open");
-  $("#play-button").addEventListener("click", () => { if (!audio.src) return notify("先选择一集播客"); if (audio.paused) audio.play(); else audio.pause(); });
-  $("#skip-back").addEventListener("click", () => { audio.currentTime = Math.max(0, audio.currentTime - 15); });
-  $("#skip-forward").addEventListener("click", () => { audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + 30); });
+  $("#play-button").addEventListener("click", () => {
+    if (!state.current) return notify("先选择一集播客");
+    if (audio.paused) openEpisode(state.current, { showDetail: false }); else audio.pause();
+  });
+  $("#skip-back").addEventListener("click", () => { cancelPendingPosition(); audio.currentTime = Math.max(0, audio.currentTime - 15); });
+  $("#skip-forward").addEventListener("click", () => { cancelPendingPosition(); audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + 30); });
   $("#add-playlist-button").addEventListener("click", () => {
     if (state.current) addToPlaylist(state.current);
     $("#player-more-menu").removeAttribute("open");
@@ -2786,21 +2888,23 @@ function initPlayer() {
   });
   audio.addEventListener("play", () => {
     $("#play-button").textContent = "Ⅱ";
-    $("[data-toggle-current-play]")?.replaceChildren("暂停");
+    if (isCurrentEpisode(state.episodeView?.episode)) {
+      $("[data-toggle-current-play]")?.replaceChildren("暂停");
+    }
+  });
+  audio.addEventListener("playing", () => {
+    if (state.current && !audio.paused && audio.currentSrc === audioOf(state.current)) markEpisodePlayed(state.current);
   });
   audio.addEventListener("pause", () => {
     $("#play-button").textContent = "▶";
-    $("[data-toggle-current-play]")?.replaceChildren("播放");
+    if (isCurrentEpisode(state.episodeView?.episode)) {
+      $("[data-toggle-current-play]")?.replaceChildren("播放");
+    }
   });
   audio.addEventListener("loadedmetadata", () => {
     $("#duration").textContent = formatTime(audio.duration);
     renderPlayerAnchors(state.current);
-    if (state.pendingResume != null && state.current) {
-      const target = state.pendingResume;
-      state.pendingResume = null;
-      if (audio.duration > 0) audio.currentTime = Math.min(target, audio.duration - 1);
-      notify(`已从 ${formatTime(target)} 继续播放`);
-    }
+    applyPendingPosition();
   });
   audio.addEventListener("timeupdate", () => {
     $("#current-time").textContent = formatTime(audio.currentTime);
@@ -2826,7 +2930,10 @@ function initPlayer() {
   audio.addEventListener("pause", flushNow);
   audio.addEventListener("ended", flushNow);
   window.addEventListener("beforeunload", flushNow);
-  $("#progress").addEventListener("input", (event) => { if (audio.duration) audio.currentTime = (event.target.value / 100) * audio.duration; });
+  $("#progress").addEventListener("input", (event) => {
+    cancelPendingPosition();
+    if (Number.isFinite(audio.duration) && audio.duration > 0) audio.currentTime = (event.target.value / 100) * audio.duration;
+  });
   initVolumeControl(audio);
 }
 
@@ -2948,6 +3055,13 @@ async function init() {
   setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
   $("#back-button").hidden = true;
   markConnection(); initPlayer(); loadPlaylist().catch(() => {}); renderRoute();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[PLAYLIST_KEY]) return;
+    const list = changes[PLAYLIST_KEY].newValue;
+    if (!Array.isArray(list)) return;
+    syncPlaylist(list);
+    if (state.route === "playlist" && !state.episodeView && !state.podcastView) renderRoute();
+  });
   $$(".nav-item").forEach((item) => item.addEventListener("click", () => setRoute(item.dataset.route)));
   $("#back-button").addEventListener("click", () => {
     if (state.episodeView) closeEpisode();

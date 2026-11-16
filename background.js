@@ -1,4 +1,6 @@
 import { filterComments, parseNextDataComments } from "./comment_utils.mjs";
+import "./settings_policy.js";
+const { proxyOrigin, summaryConsentScope, hasSummaryConsent } = globalThis.XYZSettingsPolicy;
 
 const WINDOW_KEY = "desktopWindowId";
 const BOUNDS_KEY = "desktopWindowBounds";
@@ -263,7 +265,7 @@ function normalizeSummarySettings(input = {}) {
     summaryProviders: providers,
     summaryPromptVersions: prompts,
     activeSummaryPromptId,
-    summaryConsentAccepted: Boolean(input.summaryConsentAccepted),
+    summaryConsentAccepted: hasSummaryConsent(input),
     summaryIncludeComments: Boolean(input.summaryIncludeComments)
   };
 }
@@ -353,13 +355,38 @@ async function openAppWindow() {
   return created;
 }
 
+const REQUIRED_ORIGINS = [
+  "https://api.xiaoyuzhoufm.com/*",
+  "https://podcaster-api.xiaoyuzhoufm.com/*",
+  "https://*.xiaoyuzhoufm.com/*",
+  "https://*.xyzcdn.net/*"
+];
+
+async function hasHostPermissions() {
+  try {
+    return await chrome.permissions.contains({ origins: REQUIRED_ORIGINS });
+  } catch {
+    // 查询失败时按「没有权限」处理，让界面能提示用户重新授权，而不是静默当作已授权
+    return false;
+  }
+}
+
+async function requestHostPermissions() {
+  if (await hasHostPermissions()) return true;
+  return chrome.permissions.request({ origins: REQUIRED_ORIGINS });
+}
+
 function upstreamUrl(path) {
   const root = path.startsWith("/v1/auth/") ? UPSTREAM.auth : UPSTREAM.api;
   return `${root}${path.replace(/^\/auth/, "")}`;
 }
 
-function proxyUrl(base, path) {
-  return `${base.replace(/\/$/, "")}${path}`;
+async function proxyUrl(base, path) {
+  const origin = proxyOrigin(base);
+  if (!await chrome.permissions.contains({ origins: [origin] })) {
+    throw new Error("代理站点未授权，请在高级设置中保存并授权该站点");
+  }
+  return `${base.replace(/\/+$/, "")}${path}`;
 }
 
 function withAppHeaders(auth, extra = {}) {
@@ -435,7 +462,7 @@ async function getNativeHostStatus() {
     platform: platformHint,
     manifestPath: isWindows
       ? "%LOCALAPPDATA%\\Xiaoyuzhou Desktop Native Host\\com.xiaoyuzhou.desktop.json"
-      : "~/Library/Application Support/Mozilla/NativeMessagingHosts/com.xiaoyuzhou.desktop.json",
+      : "~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.xiaoyuzhou.desktop.json",
     hostPath: isWindows
       ? "%LOCALAPPDATA%\\Xiaoyuzhou Desktop Native Host\\native-host.exe"
       : "~/Library/Application Support/Xiaoyuzhou Desktop Native Host/native-host",
@@ -469,7 +496,7 @@ async function getNativeHostStatus() {
       available: true,
       ...data,
       manifestPath: home
-        ? `${home}/Library/Application Support/Mozilla/NativeMessagingHosts/${NATIVE_HOST}.json`
+        ? `${home}/Library/Application Support/Google/Chrome/NativeMessagingHosts/${NATIVE_HOST}.json`
         : base.manifestPath,
       hostPath: home
         ? `${home}/Library/Application Support/Xiaoyuzhou Desktop Native Host/native-host`
@@ -562,7 +589,8 @@ async function transcribeAudio({
   language = "zh",
   episodeId = "",
   episodeUrl = "",
-  timeline = []
+  timeline = [],
+  consentScope = ""
 }) {
   let parsed;
   try {
@@ -572,6 +600,9 @@ async function transcribeAudio({
   }
   if (parsed.protocol !== "https:") throw new Error("只支持转写 HTTPS 音频");
   const settings = await getSettings();
+  if (consentScope && (!hasSummaryConsent(settings) || consentScope !== summaryConsentScope(settings))) {
+    throw new Error("ASR 或 AI 配置已变化，请重新发起总结并确认");
+  }
   const audioDirectory = normalizeAbsolutePath(settings.audioDownloadPath, "音频保存路径")
     || "~/Downloads/小宇宙音频";
   const transcriptDirectory = transcriptDirectoryFromSettings(settings);
@@ -679,8 +710,10 @@ async function fetchEpisodeComments(episodeId) {
   return filterComments(rawComments);
 }
 
-async function summarizeTranscript({ transcriptPath, episodeId = "" }) {
+async function summarizeTranscript({ transcriptPath, episodeId = "", consentScope = "" }) {
   const settings = await getSettings();
+  if (consentScope && consentScope !== summaryConsentScope(settings)) throw new Error("AI 配置已变化，请重新发起总结");
+  if (!hasSummaryConsent(settings)) throw new Error("AI 服务或文字稿来源已变化，请重新确认数据发送同意");
   const provider = settings.summaryProvider;
   const providerSettings = settings.summaryProviders[provider];
   const prompt = settings.summaryPromptVersions.find(
@@ -726,7 +759,7 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
   const settings = await getSettings();
   const directPath = API_ENDPOINTS[path] || path;
   const urlString = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, path)
+    ? await proxyUrl(settings.proxyBaseUrl, path)
     : upstreamUrl(directPath);
   const url = new URL(urlString);
   if (method === "GET" && body && typeof body === "object") {
@@ -741,7 +774,8 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
   const response = await guardedFetch(url, {
     method,
     headers,
-    body: method === "GET" ? undefined : JSON.stringify(body ?? {})
+    body: method === "GET" ? undefined : JSON.stringify(body ?? {}),
+    redirect: "error"
   });
   const text = await response.text();
   let data;
@@ -770,7 +804,7 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
 async function refreshToken(auth) {
   const settings = await getSettings();
   const url = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, "/refresh_token")
+    ? await proxyUrl(settings.proxyBaseUrl, "/refresh_token")
     : upstreamUrl("/app_auth_tokens.refresh");
   const response = await guardedFetch(url, {
     method: "POST",
@@ -778,7 +812,8 @@ async function refreshToken(auth) {
     body: settings.apiMode === "proxy" ? JSON.stringify({
       accessToken: auth.accessToken,
       refreshToken: auth.refreshToken
-    }) : undefined
+    }) : undefined,
+    redirect: "error"
   });
   if (!response.ok) {
     await clearAuth();
@@ -815,8 +850,18 @@ function authFromPayload(payload, response) {
   };
 }
 
+let loginQrcodeGeneration = 0;
+let activeLoginQrcodeId = null;
+
+function cancelLoginQrcode() {
+  loginQrcodeGeneration += 1;
+  activeLoginQrcodeId = null;
+}
+
 // 创建扫码登录二维码，返回 { id, url }
 async function createLoginQrcode() {
+  const generation = ++loginQrcodeGeneration;
+  activeLoginQrcodeId = null;
   const response = await guardedFetch(webAuthUrl("/v1/auth/qrcode/create"), {
     method: "POST",
     headers: WEB_AUTH_HEADERS,
@@ -826,12 +871,15 @@ async function createLoginQrcode() {
   if (!response.ok || !payload?.id || !payload?.url) {
     throw new Error(payload?.toast || payload?.message || "无法创建登录二维码");
   }
+  if (generation !== loginQrcodeGeneration) throw new Error("二维码请求已取消");
+  activeLoginQrcodeId = payload.id;
   return { id: payload.id, url: payload.url };
 }
 
 // 轮询扫码状态；扫码确认后服务端返回登录凭证
 async function pollLoginQrcode({ id }) {
-  if (!id) throw new Error("登录二维码已失效，请重新获取");
+  if (!id || id !== activeLoginQrcodeId) throw new Error("登录二维码已失效，请重新获取");
+  const generation = loginQrcodeGeneration;
   const response = await guardedFetch(webAuthUrl("/v1/auth/qrcode/login"), {
     method: "POST",
     headers: WEB_AUTH_HEADERS,
@@ -852,6 +900,7 @@ async function pollLoginQrcode({ id }) {
     if (status === "CANCELED" || status === "CANCELLED") return { status: "canceled" };
     return { status: status ? status.toLowerCase() : "waiting" };
   }
+  if (generation !== loginQrcodeGeneration || id !== activeLoginQrcodeId) return { status: "canceled" };
   await saveAuth(auth);
   return { status: "authorized", user: auth.user };
 }
@@ -877,7 +926,14 @@ async function readJsonSafe(response, fallbackMessage) {
 }
 
 async function guardedFetch(url, init) {
-  return fetch(url, init);
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    if (!(await hasHostPermissions())) {
+      throw new Error("缺少网站访问权限，请在扩展设置中授权后重试");
+    }
+    throw error;
+  }
 }
 
 async function fetchApi({ endpoint, method = "POST", body = {} }) {
@@ -895,7 +951,21 @@ async function updateSettings(next) {
   if (requestedPrompts?.some((prompt) => String(prompt?.content || "").length > 20_000)) {
     throw new Error("单个 AI 总结 Prompt 不能超过 20000 字符");
   }
-  let settings = { ...DEFAULT_SETTINGS, ...(await getSettings()), ...next };
+  const previous = await getSettings();
+  let settings = { ...DEFAULT_SETTINGS, ...previous, ...next };
+  // Consent is valid only for the exact provider, endpoint and data sources shown.
+  if (next?.summaryConsentAccepted === true && next.summaryConsentScope === summaryConsentScope(settings)) {
+    settings.summaryConsentScope = next.summaryConsentScope;
+  } else if (summaryConsentScope(settings) !== summaryConsentScope(previous)) {
+    settings.summaryConsentAccepted = false;
+    settings.summaryConsentScope = "";
+  }
+  if (settings.apiMode === "proxy") {
+    await proxyUrl(settings.proxyBaseUrl, "");
+    settings.proxyBaseUrl = settings.proxyBaseUrl.trim().replace(/\/+$/, "");
+  } else {
+    settings.apiMode = "direct";
+  }
   settings.asrSettingsVersion = ASR_SETTINGS_VERSION;
   settings.transcriptSourceSettingsVersion = TRANSCRIPT_SOURCE_SETTINGS_VERSION;
   settings = normalizeSummarySettings(settings);
@@ -941,6 +1011,58 @@ async function updateSettings(next) {
   return settings;
 }
 
+const PLAYLIST_KEY = "xyzPlaylist";
+let playlistTask = Promise.resolve();
+
+function serializePlaylist(action) {
+  const result = playlistTask.then(action);
+  playlistTask = result.catch(() => {});
+  return result;
+}
+
+async function readPlaylist() {
+  const { [PLAYLIST_KEY]: raw = [] } = await chrome.storage.local.get(PLAYLIST_KEY);
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : []).filter((entry) => {
+    const eid = entry?.eid;
+    return typeof eid === "string" && eid && !seen.has(eid) && seen.add(eid);
+  });
+}
+
+function updatePlaylist({ action, entry, eid, beforeEid, currentEid, playNext } = {}) {
+  return serializePlaylist(async () => {
+    let list = await readPlaylist();
+    if (action === "add") {
+      if (!entry?.eid || !entry?.pid) throw new Error("无法识别这个单集");
+      const existing = list.findIndex((item) => item.eid === entry.eid);
+      if (existing < 0 || playNext) {
+        // Asking to play the current item next must not move it behind its successors.
+        if (!(playNext && entry.eid === currentEid && existing >= 0)) {
+          list = list.filter((item) => item.eid !== entry.eid);
+          const current = list.findIndex((item) => item.eid === currentEid);
+          list.splice(playNext ? current + 1 : list.length, 0, entry);
+        }
+      }
+    } else if (action === "remove") {
+      list = list.filter((item) => item.eid !== eid);
+    } else if (action === "clear") {
+      list = [];
+    } else if (action === "move") {
+      const from = list.findIndex((item) => item.eid === eid);
+      const to = list.findIndex((item) => item.eid === beforeEid);
+      if (from >= 0 && to >= 0 && from !== to) {
+        const [moved] = list.splice(from, 1);
+        const target = list.findIndex((item) => item.eid === beforeEid);
+        list.splice(target, 0, moved);
+      }
+    } else {
+      throw new Error("未知播放列表操作");
+    }
+    await chrome.storage.local.set({ [PLAYLIST_KEY]: list });
+    return list;
+  });
+}
+
 async function handleMessage(message) {
   switch (message?.type) {
     case "open-app":
@@ -954,10 +1076,17 @@ async function handleMessage(message) {
       return getSettings();
     case "get-summary-history":
       return getSummaryHistory();
+    case "get-playlist":
+      return serializePlaylist(readPlaylist);
+    case "update-playlist":
+      return updatePlaylist(message.payload);
     case "update-settings":
       return updateSettings(message.settings);
     case "create-login-qrcode":
       return createLoginQrcode();
+    case "cancel-login-qrcode":
+      cancelLoginQrcode();
+      return null;
     case "poll-login-qrcode":
       return pollLoginQrcode(message.payload || {});
     case "api":
@@ -968,6 +1097,10 @@ async function handleMessage(message) {
       return transcribeAudio(message.payload);
     case "export-official-transcript":
       return exportOfficialTranscript(message.payload);
+    case "check-host-permissions":
+      return { granted: await hasHostPermissions() };
+    case "request-host-permissions":
+      return { granted: await requestHostPermissions() };
     case "get-native-host-status":
       return getNativeHostStatus();
     case "save-asr-credentials":
@@ -1019,11 +1152,22 @@ async function rememberWindowBounds(window) {
   });
 }
 
-chrome.windows.onBoundsChanged.addListener(async (window) => {
-  const current = await storedWindow();
-  if (!current || current.id !== window.id) return;
-  await rememberWindowBounds(window);
-});
+if (chrome.windows.onBoundsChanged) {
+  chrome.windows.onBoundsChanged.addListener(async (window) => {
+    const current = await storedWindow();
+    if (!current || current.id !== window.id) return;
+    await rememberWindowBounds(window);
+  });
+} else {
+  // Firefox 没有 onBoundsChanged：窗口失去焦点时记录一次尺寸。
+  chrome.windows.onFocusChanged.addListener(async (windowId) => {
+    const current = await storedWindow();
+    if (!current) return;
+    if (windowId === chrome.windows.WINDOW_ID_NONE || windowId !== current.id) {
+      await rememberWindowBounds(current);
+    }
+  });
+}
 
 chrome.windows.onRemoved.addListener(async (windowId) => {
   const { [WINDOW_KEY]: storedId } = await chrome.storage.session.get(WINDOW_KEY);
