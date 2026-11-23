@@ -52,6 +52,7 @@
           <button id="skip-back" title="后退 15 秒">↶<small>15</small></button>
           <button id="play-button" class="play-button" title="播放 / 暂停">▶</button>
           <button id="skip-forward" title="前进 30 秒">↷<small>30</small></button>
+          <button id="next-episode-button" type="button" title="播放队列中的下一首" aria-label="下一首" disabled>⏭</button>
         </div>
         <div class="player-progress">
           <span id="current-time">0:00</span>
@@ -62,6 +63,7 @@
           <span id="duration">0:00</span>
         </div>
         <div class="player-extra">
+          <button id="queue-button" class="player-link-button" type="button">队列</button>
           <button id="view-podcast-button" class="player-link-button" title="查看当前节目" disabled>查看节目</button>
           <button id="summarize-button" class="player-link-button is-accent" title="导出文字稿并总结当前单集" disabled>AI 总结</button>
           <details id="player-more-menu" class="action-menu action-menu-player">
@@ -80,6 +82,13 @@
     </div>
 
     <div id="toast" class="toast" role="status"></div>
+    <dialog id="queue-dialog" class="dialog" aria-labelledby="queue-heading">
+      <button type="button" class="dialog-close" data-close-dialog aria-label="关闭播放队列">×</button>
+      <h2 id="queue-heading">播放队列</h2>
+      <label class="checkbox-row"><input id="queue-autoplay" type="checkbox" /> 播完自动播放下一首</label>
+      <p id="queue-empty" class="dialog-lead">队列为空。可从单集的更多操作中添加。</p>
+      <ol id="queue-list" class="queue-list"></ol>
+    </dialog>
     <dialog id="login-dialog" class="dialog">
       <form id="login-form" method="dialog">
         <button type="button" class="dialog-close" data-close-dialog>×</button>

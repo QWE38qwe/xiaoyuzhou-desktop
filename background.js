@@ -645,16 +645,14 @@ async function summarizeTranscript({ transcriptPath, episodeId = "" }) {
 }
 
 async function requestJson({ path, method = "POST", body, auth, retry = true }) {
-  const directPath = API_ENDPOINTS[path] || path;
-  const url = new URL(upstreamUrl(directPath));
+  const directPath = Object.hasOwn(API_ENDPOINTS, path) ? API_ENDPOINTS[path] : null;
+  if (!directPath && path !== "/v1/episode-transcript/get") throw new Error("未知的小宇宙接口");
+  const url = new URL(upstreamUrl(directPath || path));
   if (method === "GET" && body && typeof body === "object") {
     for (const [key, value] of Object.entries(body)) url.searchParams.set(key, String(value));
   }
   if (path === "/discovery" && method === "POST") body = { returnAll: "false", ...(body || {}) };
   const headers = withAppHeaders(auth);
-  if (auth?.refreshToken && path === "/app_auth_tokens.refresh") {
-    headers["x-jike-refresh-token"] = auth.refreshToken;
-  }
 
   const response = await fetch(url, {
     method,

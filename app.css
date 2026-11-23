@@ -105,6 +105,13 @@ button { border: 0; cursor: pointer; }
 .action-menu-row .action-menu-panel { top: calc(100% + 7px); }
 .action-menu-player .action-menu-panel { bottom: calc(100% + 10px); top: auto; }
 .action-menu-player .more-button { border: 1px solid var(--line); height: 29px; }
+.player-controls button:disabled { cursor: default; opacity: .35; }
+.queue-list { display: grid; gap: 5px; list-style: none; margin: 12px 0 0; max-height: 55vh; overflow-y: auto; padding: 0; }
+.queue-row { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 5px; grid-template-columns: minmax(0, 1fr) auto auto auto; padding: 5px 0; }
+.queue-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-row button { background: transparent; border: 1px solid var(--line); border-radius: 4px; color: var(--ink); min-height: 28px; padding: 3px 6px; }
+.queue-row button:disabled { opacity: .35; }
+#subscriptions-more { margin-top: 12px; }
 .card-actions .mini-button { font-size: 10px; padding-inline: 7px; }
 
 @media (max-width: 850px) {

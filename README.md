@@ -20,7 +20,9 @@ Demo 使用虚构数据，可体验发现、节目详情、播放器、文字稿
 
 ![发现页与桌面播放器](docs/images/discover-player.png)
 
-发现页集中展示节目与单集；单集卡片展示发布日期、收听数和评论数，并可直接播放、订阅、下载、转写或复制链接。底部播放器提供进度、倍速和当前单集操作。
+发现页集中展示节目与单集。点击单集卡片可查看详情，点击“播放”或单集时间戳可切换播放内容。
+从单集的更多操作可加入队列或设为下一首。底部播放器可打开队列、手动播放下一首，并在队列中排序、删除或切换自动连播。
+队列和进度保存在当前浏览器中，重新打开扩展后点击播放可继续上次收听。进入“我的订阅”读取一页，点击“加载更多”获取下一页。
 
 ### 节目详情与单集列表
 
@@ -262,7 +264,7 @@ AI 总结稿目录留空时沿用文字稿目录，已有用户升级后不会�
 
 | 权限 | 用途 |
 | --- | --- |
-| `storage` | 保存扩展设置和当前浏览器会话中的登录状态 |
+| `storage` | 保存扩展设置、本地队列和播放进度，以及当前浏览器会话中的登录状态 |
 | `windows` | 创建和管理独立桌面窗口 |
 | `alarms` | 在连续 60 分钟无账户请求后清除当前浏览器会话的登录态 |
 | `clipboardWrite` | 复制节目和单集链接 |
@@ -276,7 +278,8 @@ AI 总结稿目录留空时沿用文字稿目录，已有用户升级后不会�
 ```bash
 node --check app.js
 node --check background.js
-/usr/bin/python3 -m py_compile native_host.py
+node --test tests/*.test.mjs tests/*.test.js
+/usr/bin/python3 -B -m unittest discover -s tests
 /usr/bin/python3 -m json.tool manifest.json >/dev/null
 sh -n install_native_host.sh
 sh -n install_local_asr.sh
