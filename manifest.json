@@ -8,7 +8,6 @@
   "permissions": [
     "storage",
     "windows",
-    "cookies",
     "alarms",
     "clipboardWrite",
     "downloads",
@@ -25,17 +24,6 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://www.xiaoyuzhoufm.com/episode/*"
-      ],
-      "js": [
-        "web_timestamp.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.xiaoyuzhoufm.com https://podcaster-api.xiaoyuzhoufm.com https://*.xiaoyuzhoufm.com https://*.xyzcdn.net; img-src 'self' data: https://*.xiaoyuzhoufm.com https://*.xyzcdn.net; media-src 'self' https://*.xiaoyuzhoufm.com https://*.xyzcdn.net;"
   },

@@ -1,8 +1,7 @@
-import { filterComments, parseNextDataComments } from "./comment_utils.mjs";
-
 const WINDOW_KEY = "desktopWindowId";
 const BOUNDS_KEY = "desktopWindowBounds";
-const AUTH_KEY = "xyzAuth";
+const AUTH_KEY = "xyzAuthSession";
+const AUTH_IDLE_MS = 60 * 60 * 1000;
 const SETTINGS_KEY = "xyzSettings";
 const SUMMARY_HISTORY_KEY = "xyzSummaryHistory";
 const NATIVE_HOST = "com.xiaoyuzhou.desktop";
@@ -130,8 +129,6 @@ const DEFAULT_SUMMARY_PROVIDERS = {
 
 const DEFAULT_BOUNDS = { width: 480, height: 900 };
 const DEFAULT_SETTINGS = {
-  apiMode: "direct",
-  proxyBaseUrl: "",
   downloadFolder: "小宇宙音频",
   transcriptFolder: "小宇宙转写稿",
   audioDownloadPath: "",
@@ -153,7 +150,6 @@ const DEFAULT_SETTINGS = {
   summaryPromptVersions: BUILTIN_SUMMARY_PROMPTS,
   activeSummaryPromptId: DEFAULT_SUMMARY_PROMPT.id,
   summaryConsentAccepted: false,
-  summaryIncludeComments: false,
   autoplay: true,
   theme: "light"
 };
@@ -239,7 +235,6 @@ function normalizeSummarySettings(input = {}) {
     summaryPromptVersions: prompts,
     activeSummaryPromptId,
     summaryConsentAccepted: Boolean(input.summaryConsentAccepted),
-    summaryIncludeComments: Boolean(input.summaryIncludeComments)
   };
 }
 
@@ -271,23 +266,19 @@ async function getSettings() {
 }
 
 async function getAuth() {
-  const { [AUTH_KEY]: auth = null } = await chrome.storage.local.get(AUTH_KEY);
-  return auth;
+  const { [AUTH_KEY]: session } = await chrome.storage.session.get(AUTH_KEY);
+  return session?.expiresAt > Date.now() ? session.auth : null;
 }
 
 async function saveAuth(auth) {
-  await chrome.storage.local.set({ [AUTH_KEY]: auth });
+  const expiresAt = Date.now() + AUTH_IDLE_MS;
+  await chrome.storage.session.set({ [AUTH_KEY]: { auth, expiresAt } });
+  await chrome.alarms.create(AUTH_KEY, { when: expiresAt });
   return auth;
 }
 
-async function authWithDeviceId(auth) {
-  if (!auth?.accessToken || auth.deviceId) return auth;
-  const next = { ...auth, deviceId: crypto.randomUUID() };
-  return saveAuth(next);
-}
-
 async function clearAuth() {
-  await chrome.storage.local.remove(AUTH_KEY);
+  await chrome.storage.session.remove(AUTH_KEY);
 }
 
 function sanitizeBounds(bounds = {}) {
@@ -331,10 +322,6 @@ async function openAppWindow() {
 function upstreamUrl(path) {
   const root = path.startsWith("/v1/auth/") ? UPSTREAM.auth : UPSTREAM.api;
   return `${root}${path.replace(/^\/auth/, "")}`;
-}
-
-function proxyUrl(base, path) {
-  return `${base.replace(/\/$/, "")}${path}`;
 }
 
 function withAppHeaders(auth, extra = {}) {
@@ -480,7 +467,6 @@ async function recordSummaryHistory(episodeId, result) {
     provider: String(result.provider || ""),
     model: String(result.model || ""),
     createdAt: new Date().toISOString(),
-    commentCount: Math.max(0, Number(result.commentCount) || 0)
   };
   const entries = Object.entries(history)
     .sort((left, right) => (
@@ -580,8 +566,9 @@ async function exportOfficialTranscript({
   if (!/^[A-Za-z0-9_-]+$/.test(eid)) {
     throw new Error("无法识别需要导出文字稿的单集");
   }
-  const auth = await authWithDeviceId(await getAuth());
+  const auth = await getAuth();
   if (!auth?.accessToken) throw new Error("请先登录小宇宙");
+  await saveAuth(auth);
 
   const detailResponse = await requestJson({
     path: "/episode_detail",
@@ -631,29 +618,6 @@ async function importSummaryTranscript() {
   });
 }
 
-async function fetchEpisodeComments(episodeId) {
-  const eid = String(episodeId || "");
-  if (!/^[A-Za-z0-9_-]+$/.test(eid)) {
-    throw new Error("无法识别需要抓取评论的单集");
-  }
-  const response = await fetch(
-    `https://www.xiaoyuzhoufm.com/episode/${encodeURIComponent(eid)}`,
-    {
-      method: "GET",
-      credentials: "omit",
-      headers: {
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "zh-CN,zh;q=0.9"
-      }
-    }
-  );
-  if (!response.ok) {
-    throw new Error(`评论页面请求失败（HTTP ${response.status}）`);
-  }
-  const rawComments = parseNextDataComments(await response.text());
-  return filterComments(rawComments);
-}
-
 async function summarizeTranscript({ transcriptPath, episodeId = "" }) {
   const settings = await getSettings();
   const provider = settings.summaryProvider;
@@ -665,15 +629,6 @@ async function summarizeTranscript({ transcriptPath, episodeId = "" }) {
     throw new Error("请先配置 AI 总结接口地址和模型");
   }
   if (!prompt?.content) throw new Error("当前 AI 总结 Prompt 无效");
-  let commentResult = { comments: [], totalCount: 0, filteredCount: 0 };
-  let commentWarning = "";
-  if (settings.summaryIncludeComments && episodeId) {
-    try {
-      commentResult = await fetchEpisodeComments(episodeId);
-    } catch (error) {
-      commentWarning = error.message;
-    }
-  }
   const result = await nativeHostRequest({
     action: "summarize_transcript",
     transcriptPath: String(transcriptPath || ""),
@@ -683,27 +638,15 @@ async function summarizeTranscript({ transcriptPath, episodeId = "" }) {
     endpoint: providerSettings.endpoint,
     model: providerSettings.model,
     prompt: prompt.content,
-    promptId: prompt.id,
-    comments: commentResult.comments
+    promptId: prompt.id
   });
-  const output = {
-    ...result,
-    commentCount: commentResult.comments.length,
-    commentTotalCount: commentResult.totalCount,
-    commentFilteredCount: commentResult.filteredCount,
-    commentWarning
-  };
-  await recordSummaryHistory(episodeId, output);
-  return output;
+  await recordSummaryHistory(episodeId, result);
+  return result;
 }
 
 async function requestJson({ path, method = "POST", body, auth, retry = true }) {
-  const settings = await getSettings();
   const directPath = API_ENDPOINTS[path] || path;
-  const urlString = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, path)
-    : upstreamUrl(directPath);
-  const url = new URL(urlString);
+  const url = new URL(upstreamUrl(directPath));
   if (method === "GET" && body && typeof body === "object") {
     for (const [key, value] of Object.entries(body)) url.searchParams.set(key, String(value));
   }
@@ -716,6 +659,7 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
   const response = await fetch(url, {
     method,
     headers,
+    redirect: "error",
     body: method === "GET" ? undefined : JSON.stringify(body ?? {})
   });
   const text = await response.text();
@@ -725,10 +669,6 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
   } catch {
     data = { message: text };
   }
-
-  // #region debug-point A:episode-detail-shape
-  if (globalThis.__XYZ_DEBUG_PLATFORM_TRANSCRIPT__ && path === "/episode_detail") fetch("http://127.0.0.1:7777/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "platform-transcript-source", runId: "pre-fix", hypothesisId: "A", location: "background.js:requestJson", msg: "[DEBUG] Episode detail response observed", data: { status: response.status, topLevelKeys: Object.keys(data || {}).slice(0, 20), episodeKeys: Object.keys(data?.data || {}).filter((key) => /^(eid|media|transcript|shownotes|duration)$/i.test(key)).sort() }, ts: Date.now() }) }).catch(() => {});
-  // #endregion
 
   if (response.status === 401 && retry && auth?.refreshToken) {
     const refreshed = await refreshToken(auth);
@@ -744,20 +684,14 @@ async function requestJson({ path, method = "POST", body, auth, retry = true }) 
 }
 
 async function refreshToken(auth) {
-  const settings = await getSettings();
-  const url = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, "/refresh_token")
-    : upstreamUrl("/app_auth_tokens.refresh");
+  const url = upstreamUrl("/app_auth_tokens.refresh");
   const response = await fetch(url, {
     method: "POST",
-    headers: withAppHeaders(auth, { "x-jike-refresh-token": auth.refreshToken }),
-    body: settings.apiMode === "proxy" ? JSON.stringify({
-      accessToken: auth.accessToken,
-      refreshToken: auth.refreshToken
-    }) : undefined
+    redirect: "error",
+    headers: withAppHeaders(auth, { "x-jike-refresh-token": auth.refreshToken })
   });
   if (!response.ok) {
-    await clearAuth();
+    if ((await getAuth())?.accessToken === auth.accessToken) await clearAuth();
     throw new Error("登录已过期，请重新登录");
   }
   const json = await response.json();
@@ -766,17 +700,15 @@ async function refreshToken(auth) {
     accessToken: json?.data?.accessToken || json?.data?.access_token || json?.data?.["x-jike-access-token"] || response.headers.get("x-jike-access-token") || auth.accessToken,
     refreshToken: json?.data?.refreshToken || json?.data?.refresh_token || json?.data?.["x-jike-refresh-token"] || response.headers.get("x-jike-refresh-token") || auth.refreshToken
   };
+  if ((await getAuth())?.accessToken !== auth.accessToken) throw new Error("登录状态已变化，请重试");
   return saveAuth(next);
 }
 
 async function loginWithSms({ areaCode = "+86", mobilePhoneNumber, verifyCode }) {
-  const settings = await getSettings();
-  const path = "/v1/auth/login-with-sms";
-  const url = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, "/login")
-    : upstreamUrl(path);
+  const url = upstreamUrl("/v1/auth/login-with-sms");
   const response = await fetch(url, {
     method: "POST",
+    redirect: "error",
     headers: { ...APP_HEADERS, Origin: "https://podcaster.xiaoyuzhoufm.com" },
     body: JSON.stringify({ areaCode, mobilePhoneNumber, verifyCode })
   });
@@ -793,13 +725,10 @@ async function loginWithSms({ areaCode = "+86", mobilePhoneNumber, verifyCode })
 }
 
 async function sendSmsCode({ areaCode = "+86", mobilePhoneNumber }) {
-  const settings = await getSettings();
-  const path = "/v1/auth/send-code";
-  const url = settings.apiMode === "proxy" && settings.proxyBaseUrl
-    ? proxyUrl(settings.proxyBaseUrl, "/send-code")
-    : upstreamUrl(path);
+  const url = upstreamUrl("/v1/auth/send-code");
   const response = await fetch(url, {
     method: "POST",
+    redirect: "error",
     headers: { ...APP_HEADERS, Origin: "https://podcaster.xiaoyuzhoufm.com" },
     body: JSON.stringify({ areaCode, mobilePhoneNumber })
   });
@@ -809,8 +738,10 @@ async function sendSmsCode({ areaCode = "+86", mobilePhoneNumber }) {
 }
 
 async function fetchApi({ endpoint, method = "POST", body = {} }) {
-  const auth = await authWithDeviceId(await getAuth());
+  if (!Object.hasOwn(API_ENDPOINTS, endpoint)) throw new Error("未知的小宇宙接口");
+  const auth = await getAuth();
   if (!auth?.accessToken) throw new Error("请先登录小宇宙");
+  await saveAuth(auth);
   const { data } = await requestJson({ path: endpoint, method, body, auth });
   return data;
 }
@@ -824,6 +755,9 @@ async function updateSettings(next) {
     throw new Error("单个 AI 总结 Prompt 不能超过 20000 字符");
   }
   let settings = { ...DEFAULT_SETTINGS, ...(await getSettings()), ...next };
+  delete settings.apiMode;
+  delete settings.proxyBaseUrl;
+  delete settings.summaryIncludeComments;
   settings.asrSettingsVersion = ASR_SETTINGS_VERSION;
   settings.transcriptSourceSettingsVersion = TRANSCRIPT_SOURCE_SETTINGS_VERSION;
   settings = normalizeSummarySettings(settings);
@@ -874,7 +808,7 @@ async function handleMessage(message) {
     case "open-app":
       return openAppWindow();
     case "get-auth":
-      return getAuth();
+      return publicAuth(await getAuth());
     case "logout":
       await clearAuth();
       return null;
@@ -887,7 +821,7 @@ async function handleMessage(message) {
     case "send-code":
       return sendSmsCode(message.payload);
     case "login":
-      return loginWithSms(message.payload);
+      return publicAuth(await loginWithSms(message.payload));
     case "api":
       return fetchApi(message.payload);
     case "download-audio":
@@ -921,6 +855,14 @@ async function handleMessage(message) {
   }
 }
 
+function publicAuth(auth) {
+  return auth ? { user: { nickname: auth.user?.nickname, name: auth.user?.name } } : null;
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === AUTH_KEY && !(await getAuth())) await clearAuth();
+});
+
 chrome.action.onClicked.addListener(() => openAppWindow().catch(console.error));
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -931,6 +873,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
+  await chrome.storage.local.remove("xyzAuth");
   const { [SETTINGS_KEY]: settings } = await chrome.storage.local.get(SETTINGS_KEY);
   if (!settings) await chrome.storage.local.set({ [SETTINGS_KEY]: DEFAULT_SETTINGS });
 });
